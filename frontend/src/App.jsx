@@ -1,7 +1,15 @@
 import { useState, useEffect } from "react";
 import "./App.css";
 
-const API_BASE = process.env.REACT_APP_API_URL || "https://bharat-terminal-api.onrender.com";
+// API Configuration - supports development and production
+const getAPIBase = () => {
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    return process.env.REACT_APP_API_URL || 'http://localhost:8000';
+  }
+  return process.env.REACT_APP_API_URL || 'https://bharat-terminal-api.onrender.com';
+};
+
+const API_BASE = getAPIBase();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UTILITY FUNCTIONS
@@ -50,10 +58,12 @@ function SearchBar({ onSearch, loading }) {
     if (value.length > 0) {
       try {
         const res = await fetch(`${API_BASE}/search?q=${value}`);
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
         const data = await res.json();
         setSuggestions(data.results || []);
       } catch (err) {
-        console.error(err);
+        console.error('Search failed:', err);
+        setSuggestions([]);
       }
     } else {
       setSuggestions([]);
@@ -62,8 +72,9 @@ function SearchBar({ onSearch, loading }) {
 
   const handleSubmit = (e, symbol = input) => {
     e?.preventDefault();
-    if (symbol.trim()) {
-      onSearch(symbol.toUpperCase());
+    const trimmedSymbol = symbol.trim();
+    if (trimmedSymbol && trimmedSymbol.length > 0) {
+      onSearch(trimmedSymbol.toUpperCase());
       setInput("");
       setSuggestions([]);
     }
@@ -308,13 +319,22 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/analyze/${symbol}`);
-      if (!res.ok) throw new Error("Stock not found");
+      const url = `${API_BASE}/analyze/${symbol}`;
+      console.log("Fetching from:", url);
+      const res = await fetch(url);
+      
+      if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error(`Stock "${symbol}" not found. Try: RELIANCE, TCS, INFY, HDFCBANK`);
+        }
+        throw new Error(`Server error: ${res.status}`);
+      }
+      
       const data = await res.json();
       setSelectedStock(data);
     } catch (err) {
-      setError(err.message);
-      console.error(err);
+      console.error("Error:", err);
+      setError(err.message || "Failed to fetch stock data. Check backend connection.");
     }
     setLoading(false);
   };
