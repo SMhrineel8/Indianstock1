@@ -24,59 +24,125 @@
 
 ---
 
-## 🚀 Quick Setup (No Coding Required)
+## 🚀 DEPLOYMENT GUIDE FOR RENDER
 
-### Step 1: Get the Code on GitHub
+### Prerequisites
+- GitHub account with repo pushed
+- Render.com account
+- NVIDIA API Key for NIM
 
-1. Go to [github.com](https://github.com) → Create New Repository
-2. Name it `bharat-terminal`
-3. Upload all these files
+---
 
-### Step 2: Deploy Frontend on Render
+### Step 1: Deploy Backend API on Render
 
-1. Go to [render.com](https://render.com) → New → Static Site
-2. Connect your GitHub repo
-3. Set:
-   - **Root Directory**: `frontend`
-   - **Build Command**: `npm install && npm run build`
-   - **Publish Directory**: `dist`
-4. Click Deploy
+1. Go to [render.com](https://render.com) → **New** → **Web Service**
+2. Connect your GitHub repo (`Indianstock1`)
+3. Configure the Web Service:
+   ```
+   Name: bharat-terminal-api
+   Root Directory: backend
+   Environment: Python 3
+   Build Command: pip install -r requirements.txt
+   Start Command: uvicorn main:app --host 0.0.0.0 --port 8000
+   ```
+4. Add Environment Variables:
+   - Key: `NVIDIA_API_KEY`
+   - Value: [Your NVIDIA NIM API Key]
+5. Click **Deploy**
+6. Wait for deployment ✅
+7. **Copy your Backend URL** (e.g., `https://bharat-terminal-api.onrender.com`)
 
-### Step 3: Deploy Backend on Render
+---
 
-1. Render → New → Web Service
-2. Connect same GitHub repo
-3. Set:
-   - **Root Directory**: `backend`
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `uvicorn main:app --host 0.0.0.0 --port 8000`
-4. Add Environment Variable:
-   - `NVIDIA_API_KEY` = your NVIDIA NIM API key
-5. Click Deploy
+### Step 2: Deploy Frontend Static Site on Render
 
-### Step 4: Connect Frontend to Backend
+1. Go to [render.com](https://render.com) → **New** → **Static Site**
+2. Connect your GitHub repo (`Indianstock1`)
+3. Configure the Static Site:
+   ```
+   Name: bharat-terminal-ui
+   Root Directory: frontend
+   Build Command: npm install && npm run build
+   Publish Directory: dist
+   ```
+4. Click **Deploy**
+5. Wait for deployment ✅
+6. **Copy your Frontend URL** (e.g., `https://bharat-terminal-ui.onrender.com`)
 
-In `frontend/src/App.jsx`, the NVIDIA API calls go directly from browser.
-For the backend API (stock data, etc.), update the base URL to your Render backend URL.
+---
+
+### Step 3: Update Frontend to Use Live Backend
+
+1. In `frontend/vite.config.js`, update the backend URL:
+   ```javascript
+   proxy: {
+     '/api': {
+       target: 'https://YOUR-BACKEND-URL.onrender.com',  // Update this!
+       changeOrigin: true,
+       secure: true,
+     }
+   }
+   ```
+2. Commit and push to GitHub
+3. Render will auto-redeploy
 
 ---
 
 ## 📁 Project Structure
 
 ```
-bharat-terminal/
-├── frontend/
+Indianstock1/
+├── frontend/                ← React + Vite
 │   ├── src/
-│   │   ├── App.jsx          ← Main terminal UI (all-in-one)
+│   │   ├── App.jsx          ← Main terminal UI
 │   │   └── main.jsx         ← React entry point
 │   ├── index.html
 │   ├── package.json
-│   └── vite.config.js
-├── backend/
-│   ├── main.py              ← FastAPI server
+│   ├── vite.config.js       ← ✅ Correctly named
+│   ├── .gitignore
+│   └── dist/                ← Build output (auto-generated)
+├── backend/                 ← FastAPI
+│   ├── main.py
 │   └── requirements.txt
+├── render.yaml              ← Render deployment config
+├── .nvmrc                   ← Node version 24.14.1
 └── README.md
 ```
+
+---
+
+## 🔧 Local Development
+
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev        # Start on http://localhost:3000
+npm run build      # Build for production
+```
+
+### Backend
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn main:app --reload
+```
+
+---
+
+## ✅ Deployment Checklist
+
+- [x] Frontend config fixed (vite.config.js)
+- [x] render.yaml updated (type: static)
+- [x] index.html script path corrected (/src/main.jsx)
+- [x] package.json includes react-dom
+- [x] .gitignore added (excludes node_modules)
+- [x] .nvmrc set to Node 24.14.1
+- [x] Build tested locally (npm run build works)
+- [ ] Backend deployed on Render
+- [ ] Frontend deployed on Render (Static Site)
+- [ ] Backend URL updated in vite.config.js
+- [ ] Frontend redeployed with updated backend URL
 
 ---
 
@@ -98,6 +164,56 @@ Raw Stock Data (Yahoo Finance)
 │  P&F AI        →  BREAKOUT BUY         │
 └─────────────────────────────────────────┘
          ↓
+Final AI Consensus → Recommendation
+```
+
+---
+
+## 📊 API Endpoints
+
+### Stock Analysis
+```
+GET /api/analyze?symbol=RELIANCE
+```
+
+### News Feed
+```
+GET /api/news
+```
+
+### Expert Calls
+```
+GET /api/expert-calls
+POST /api/expert-calls (add new call)
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### Build fails with "terser not found"
+- **Fixed**: Removed custom minify config
+- Vite uses esbuild by default (faster, simpler)
+
+### "Cannot find module 'react-dom'"
+- **Fixed**: Added to package.json dependencies
+
+### Render shows "Cannot GET /"
+- **Cause**: Static site not building correctly
+- **Solution**: Check render.yaml has `type: static` and `publishPath: dist`
+
+### Frontend can't reach backend
+- **Solution**: Update vite.config.js proxy target to your backend URL
+- Redeploy frontend after update
+
+---
+
+## 📝 Notes
+
+- NVIDIA NIM calls happen **directly from browser** (no backend needed)
+- Stock data & news go through **backend API**
+- Static site deployment means **no Node runtime needed** on Render (cheaper!)
+- Frontend is fully compiled to HTML/CSS/JS in `dist/` folder
   FINAL DECISION AI
   "STRONG BUY | 82/100 Confidence"
   Entry: ₹2920 | SL: ₹2870 | T1: ₹3050 | T2: ₹3200
