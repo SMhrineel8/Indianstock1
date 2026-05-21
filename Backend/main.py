@@ -1,21 +1,30 @@
 """
-Bharat Terminal - AI Institutional Intelligence Backend
-FastAPI + Python + NVIDIA NIM + Yahoo Finance
+🚀 BHARAT TERMINAL - AI-POWERED INSTITUTIONAL INTELLIGENCE FOR INDIAN MARKETS
+Backend: FastAPI + Python + NVIDIA NIM + Yahoo Finance
+Live NSE/BSE data, Multi-agent AI debate, Trading strategies
 """
 
 from __future__ import annotations
-import os, re, json, httpx
+import os, re, json, httpx, requests
 from datetime import datetime
-from typing import List, Optional, AsyncGenerator
+from typing import List, Optional, Literal, Any
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+import asyncio
 
-app = FastAPI(title="Bharat Terminal API", version="1.0.0")
+# ─────────────────────────────────────────────────────────────────────────────
+# FASTAPI APP
+# ─────────────────────────────────────────────────────────────────────────────
+
+app = FastAPI(
+    title="⚡ Bharat Terminal API",
+    version="2.0.0",
+    description="Bloomberg-style terminal for Indian markets with NVIDIA NIM AI"
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,395 +33,409 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CONFIG
+# ─────────────────────────────────────────────────────────────────────────────
+
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "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")
 NVIDIA_BASE = "https://integrate.api.nvidia.com/v1"
 
-# ── In-memory stores ──────────────────────────────────────────────────────────
-TELEGRAM_CALLS: list[dict] = []
-
 NIFTY50 = [
-    "RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK",
-    "HINDUNILVR","ITC","SBIN","BAJFINANCE","BHARTIARTL",
-    "WIPRO","LT","AXISBANK","ASIANPAINT","MARUTI",
-    "TITAN","SUNPHARMA","ULTRACEMCO","NESTLEIND","TECHM",
-    "POWERGRID","NTPC","TATAMOTORS","ONGC","HCLTECH",
-    "JSWSTEEL","TATASTEEL","INDUSINDBK","DRREDDY","DIVISLAB",
-    "CIPLA","HINDALCO","COALINDIA","BAJAJFINSV","ADANIENT",
-    "ADANIPORTS","TATACONSUM","SBILIFE","HDFC","APOLLOHOSP",
+    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
+    "HINDUNILVR.NS", "ITC.NS", "SBIN.NS", "BAJFINANCE.NS", "BHARTIARTL.NS",
+    "WIPRO.NS", "LT.NS", "AXISBANK.NS", "ASIANPAINT.NS", "MARUTI.NS",
+    "TITAN.NS", "SUNPHARMA.NS", "ULTRACEMCO.NS", "NESTLEIND.NS", "TECHM.NS",
+    "POWERGRID.NS", "NTPC.NS", "TATAMOTORS.NS", "ONGC.NS", "HCLTECH.NS",
+    "JSWSTEEL.NS", "TATASTEEL.NS", "INDUSINDBK.NS", "DRREDDY.NS", "DIVISLAB.NS",
+    "CIPLA.NS", "HINDALCO.NS", "COALINDIA.NS", "BAJAJFINSV.NS", "ADANIENT.NS",
+    "ADANIPORTS.NS", "TATACONSUM.NS", "SBILIFE.NS", "HDFC.NS", "APOLLOHOSP.NS",
 ]
 
-# ── Agent Prompts ─────────────────────────────────────────────────────────────
-
+# AI Agent Prompts
 AGENT_PROMPTS = {
-    "technical": """You are an elite technical analyst for Indian markets (NSE/BSE).
-Analyze the given stock data and provide:
-1. Signal: STRONG BUY / BUY / HOLD / SELL / STRONG SELL
-2. Key Technical Observations (3 bullet points)
-3. Entry Zone: ₹X - ₹Y | Stop Loss: ₹X | Target 1: ₹X | Target 2: ₹X
-4. RSI Analysis | SMA Trend | Volume Trend
-Keep it institutional-grade and sharp.""",
+    "technical": """You are an elite technical analyst for Indian NSE/BSE markets.
+Analyze the stock data and respond ONLY with:
+[SIGNAL]: BUY|SELL|HOLD
+[ANALYSIS]: 2-3 sentence technical analysis with key levels
+[CONFIDENCE]: 0-100""",
 
-    "fundamental": """You are a senior fundamental analyst (JPMorgan India Research).
-Embody the Warren Buffett + Rakesh Jhunjhunwala framework for Indian markets.
-Provide:
-1. Signal: STRONG BUY / BUY / HOLD / SELL / STRONG SELL
-2. Valuation Assessment (overvalued/fair/undervalued)
-3. Key Business Drivers (3 bullets)
-4. Estimated Fair Value in INR
-5. Investment Grade: A/B/C""",
+    "fundamental": """You are a fundamental analyst using Warren Buffett + Rakesh Jhunjhunwala framework.
+For this Indian stock, respond ONLY with:
+[SIGNAL]: BUY|SELL|HOLD
+[ANALYSIS]: 2-3 sentences on valuation, business quality, and fair value
+[CONFIDENCE]: 0-100""",
 
-    "macro": """You are Chief Macro Strategist at Bridgewater Associates (India desk).
-For the given Indian stock, analyze:
-1. Signal: STRONG BUY / BUY / HOLD / SELL / STRONG SELL
-2. Macro Tailwinds for this sector
-3. FII/DII Flow Implications
-4. RBI Rate Cycle Impact
-5. Global Macro Risks (USD/INR, crude, Fed)
-Be institutional-grade and precise.""",
+    "macro": """You are Chief Macro Strategist analyzing Indian markets (Bridgewater style).
+Respond ONLY with:
+[SIGNAL]: BUY|SELL|HOLD
+[ANALYSIS]: 2-3 sentences on sector tailwinds, FII flows, RBI, and macro risks
+[CONFIDENCE]: 0-100""",
 
-    "sentiment": """You are a sentiment intelligence analyst for Indian markets.
-Analyze:
-1. Signal: STRONG BUY / BUY / HOLD / SELL / STRONG SELL
-2. Overall Market Sentiment: Bullish/Bearish/Neutral (score 0-100)
-3. Recent News Catalysts
-4. Social/Reddit Sentiment Summary
-5. Institutional vs Retail Sentiment Divergence
-Be data-driven and sharp.""",
+    "sentiment": """You are a sentiment analyst tracking news and social signals for Indian markets.
+Respond ONLY with:
+[SIGNAL]: BUY|SELL|HOLD
+[ANALYSIS]: 2-3 sentences on recent catalysts, news, and market sentiment
+[CONFIDENCE]: 0-100""",
 
-    "risk": """You are a Risk Manager at a top Indian hedge fund (Nassim Taleb framework).
-Assess:
-1. Risk Level: LOW / MEDIUM / HIGH / EXTREME
-2. Key Risk Factors (3 bullets: regulatory, market, execution)
-3. Max Recommended Position: X% of portfolio
-4. Worst-Case Scenario
-5. Risk-Adjusted Verdict: Worth the risk? Yes/No/Maybe
-Use asymmetric risk thinking.""",
+    "risk": """You are a Risk Manager using Nassim Taleb's asymmetric risk framework.
+Respond ONLY with:
+[SIGNAL]: BUY|SELL|HOLD
+[ANALYSIS]: 2-3 sentences on key risks, downside protection, and risk/reward
+[CONFIDENCE]: 0-100""",
 
     "options": """You are an institutional derivatives strategist (Citadel India desk).
-For this stock's options market:
-1. Options Signal: BUY CALLS / BUY PUTS / SELL OPTIONS / HOLD
-2. Implied Volatility Assessment: High/Normal/Low
-3. Best Strategy for Current Setup
-4. Suggested Strike + Expiry
-5. Max Profit / Max Loss / Breakeven
-6. Greeks that matter most for this trade""",
-
-    "pnf": """You are a Point & Figure chart specialist for Indian markets.
-One of very few experts in P&F analysis for NSE/BSE.
-Analyze using P&F methodology:
-1. Signal: BUY / SELL / HOLD
-2. P&F Pattern Detected (Double Top, Triple Bottom, etc.)
-3. Box Size and Reversal Recommendation
-4. Key Support / Resistance Levels from P&F
-5. Price Target from P&F pattern
-6. Column Direction: X (bullish) / O (bearish)""",
-
-    "final": """You are the Portfolio Manager at an Indian institutional fund making the FINAL trade decision.
-You receive inputs from Technical, Fundamental, Macro, Sentiment, Risk, Options, and P&F agents.
-Synthesize ALL signals:
-
-1. FINAL VERDICT: STRONG BUY / BUY / HOLD / SELL / STRONG SELL
-2. Confidence Score: XX/100
-3. Reasoning: (3-4 sentences synthesizing all agent views)
-4. Trade Setup:
-   - Entry: ₹X | Stop Loss: ₹X | Target 1: ₹X | Target 2: ₹X
-   - Risk:Reward Ratio
-5. Suitable For: Aggressive / Moderate / Conservative investors
-6. Time Horizon: Intraday / Swing (1-2 weeks) / Positional (1-3 months) / Long-term
-7. Position Size: X% of portfolio
-
-This is the institutional decision. Make it count.""",
+Respond ONLY with:
+[SIGNAL]: BUY_CALLS|BUY_PUTS|SELL_OPTIONS|HOLD
+[ANALYSIS]: 2-3 sentences on implied vol, best strategy, and greeks
+[CONFIDENCE]: 0-100""",
 }
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# UTILITY FUNCTIONS
+# ─────────────────────────────────────────────────────────────────────────────
 
-def compute_rsi(close: pd.Series, period: int = 14) -> float:
+def normalize_symbol(symbol: str) -> str:
+    """Normalize stock symbol to NSE format"""
+    symbol = symbol.strip().upper()
+    if not symbol.endswith((".NS", ".BO")):
+        symbol = f"{symbol}.NS"
+    return symbol
+
+def scalar(value: Any) -> Any:
+    """Convert pandas/numpy to scalar"""
+    if isinstance(value, pd.Series):
+        return value.iloc[0]
+    if isinstance(value, np.ndarray):
+        return value.item() if value.size == 1 else value
+    return value
+
+def compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    """Compute RSI"""
+    close = pd.to_numeric(close, errors="coerce")
     delta = close.diff()
-    gain = delta.clip(lower=0).ewm(alpha=1 / period, adjust=False).mean()
-    loss = (-delta.clip(upper=0)).ewm(alpha=1 / period, adjust=False).mean()
-    rs = gain / loss.replace(0, np.nan)
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
-    return float(rsi.fillna(100).iloc[-1])
+    return rsi.fillna(50)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# DATA FETCHING
+# ─────────────────────────────────────────────────────────────────────────────
 
-def compute_sma(close: pd.Series, period: int) -> Optional[float]:
-    if len(close) < period:
-        return None
-    return float(close.rolling(period).mean().iloc[-1])
+def fetch_stock_data(symbol: str, period: str = "6mo") -> pd.DataFrame:
+    """Fetch historical stock data from Yahoo Finance"""
+    try:
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        
+        ticker = yf.Ticker(symbol, session=session)
+        df = ticker.history(period=period, interval="1d", auto_adjust=False)
+        
+        if df is None or df.empty:
+            raise HTTPException(status_code=404, detail=f"No data for {symbol}")
+        
+        df = df.reset_index()
+        return df
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Yahoo Finance error: {str(e)}")
 
+def get_fundamentals(symbol: str) -> dict:
+    """Fetch fundamental data"""
+    try:
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        
+        ticker = yf.Ticker(symbol, session=session)
+        info = ticker.info or {}
+        
+        return {
+            "name": info.get("longName") or symbol,
+            "pe_ratio": info.get("trailingPE"),
+            "pb_ratio": info.get("priceToBook"),
+            "dividend_yield": info.get("dividendYield"),
+            "market_cap": info.get("marketCap"),
+            "beta": info.get("beta"),
+        }
+    except Exception:
+        return {"name": symbol}
 
-def get_signal(price: float, sma20: float, sma50: float, rsi: float) -> dict:
-    score = 50
-    if sma20 and sma50:
-        diff_pct = ((sma20 - sma50) / price) * 100
-        score += int(max(min(diff_pct * 3, 20), -20))
-    if rsi >= 60:
-        score += 12
-    elif rsi >= 55:
-        score += 6
-    elif rsi <= 40:
-        score -= 12
-    elif rsi <= 45:
-        score -= 6
-    if sma20 and sma50:
-        if sma20 > sma50 and rsi >= 55:
-            return {"signal": "BUY", "confidence": min(100, score + 10)}
-        if sma20 < sma50 and rsi <= 45:
-            return {"signal": "SELL", "confidence": max(0, score - 10)}
-    return {"signal": "HOLD", "confidence": max(0, min(100, score))}
+def build_technical_signal(df: pd.DataFrame) -> dict:
+    """Build technical analysis signal"""
+    try:
+        close = pd.to_numeric(df["Close"], errors="coerce").dropna()
+        if len(close) < 50:
+            return {"signal": "HOLD", "rsi": 50, "sma20": 0, "sma50": 0, "confidence": 50}
+        
+        sma20 = float(scalar(close.rolling(20).mean().iloc[-1]))
+        sma50 = float(scalar(close.rolling(50).mean().iloc[-1]))
+        rsi14 = float(scalar(compute_rsi(close).iloc[-1]))
+        
+        confidence = 50
+        if sma20 > sma50 and rsi14 >= 55:
+            signal = "BUY"
+            confidence = min(int(50 + (rsi14 - 50) / 5), 100)
+        elif sma20 < sma50 and rsi14 <= 45:
+            signal = "SELL"
+            confidence = max(int(50 - (50 - rsi14) / 5), 0)
+        else:
+            signal = "HOLD"
+            confidence = 50
+        
+        return {
+            "signal": signal,
+            "rsi": round(rsi14, 2),
+            "sma20": round(sma20, 2),
+            "sma50": round(sma50, 2),
+            "confidence": confidence
+        }
+    except Exception:
+        return {"signal": "HOLD", "rsi": 50, "sma20": 0, "sma50": 0, "confidence": 50}
 
+# ─────────────────────────────────────────────────────────────────────────────
+# NVIDIA NIM AI - Dual Implementation
+# ─────────────────────────────────────────────────────────────────────────────
 
-async def stream_nvidia(messages: list, system: str = None) -> AsyncGenerator[str, None]:
-    if system:
-        messages = [{"role": "system", "content": system}] + messages
+# Option 1: OpenAI Python Client (Simpler, Official)
+try:
+    from openai import OpenAI
+    NVIDIA_CLIENT = OpenAI(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key=NVIDIA_API_KEY
+    )
+    USE_OPENAI_CLIENT = True
+except ImportError:
+    USE_OPENAI_CLIENT = False
 
-    async with httpx.AsyncClient(timeout=60) as client:
-        async with client.stream(
-            "POST",
-            f"{NVIDIA_BASE}/chat/completions",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {NVIDIA_API_KEY}",
-            },
-            json={
-                "model": "openai/gpt-oss-120b",
-                "messages": messages,
-                "temperature": 0.7,
-                "top_p": 1,
-                "max_tokens": 1024,
-                "stream": True,
-            },
-        ) as resp:
-            async for line in resp.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                data = line[6:].strip()
-                if data == "[DONE]":
-                    return
-                try:
-                    j = json.loads(data)
-                    delta = j["choices"][0]["delta"].get("content", "")
-                    if delta:
-                        yield delta
-                except Exception:
-                    pass
+async def call_nvidia_ai(messages: list, temperature: float = 0.7) -> str:
+    """Call NVIDIA NIM API - supports both OpenAI client and httpx"""
+    
+    # Method 1: Use OpenAI Client (if available)
+    if USE_OPENAI_CLIENT:
+        try:
+            completion = NVIDIA_CLIENT.chat.completions.create(
+                model="openai/gpt-oss-120b",
+                messages=messages,
+                temperature=temperature,
+                top_p=1,
+                max_tokens=1024,
+                stream=False
+            )
+            return completion.choices[0].message.content
+        except Exception as e:
+            print(f"OpenAI client error: {e}, falling back to httpx")
+    
+    # Method 2: Fallback to async httpx (always available)
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{NVIDIA_BASE}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {NVIDIA_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "meta/llama-3.1-405b-instruct",
+                    "messages": messages,
+                    "temperature": temperature,
+                    "top_p": 1,
+                    "max_tokens": 1024,
+                    "stream": False
+                }
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data["choices"][0]["message"]["content"]
+            else:
+                return "HOLD"
+    except Exception as e:
+        print(f"NVIDIA API error: {e}")
+        return "HOLD"
 
+def parse_agent_response(response: str) -> dict:
+    """Parse agent response"""
+    signal = "HOLD"
+    confidence = 50
+    analysis = response
+    
+    try:
+        if "[SIGNAL]:" in response:
+            signal_line = response.split("[SIGNAL]:")[1].split("\n")[0].strip()
+            signal = signal_line.split("|")[0].strip()
+        
+        if "[CONFIDENCE]:" in response:
+            conf_line = response.split("[CONFIDENCE]:")[1].split("\n")[0].strip()
+            confidence = int(conf_line)
+        
+        if "[ANALYSIS]:" in response:
+            analysis = response.split("[ANALYSIS]:")[1].split("[CONFIDENCE]")[0].strip()
+    except:
+        pass
+    
+    return {"signal": signal, "confidence": confidence, "analysis": analysis}
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINTS
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.get("/")
 def root():
-    return {"name": "Bharat Terminal API", "status": "running", "version": "1.0.0"}
+    return {
+        "name": "⚡ Bharat Terminal API",
+        "version": "2.0.0",
+        "endpoints": {
+            "search": "/search?q=RELIANCE",
+            "analyze": "/analyze/RELIANCE",
+            "nifty50": "/nifty50",
+            "news": "/news",
+        }
+    }
 
+@app.get("/health")
+def health():
+    return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
-@app.get("/api/stock/{symbol}")
-async def get_stock(symbol: str):
-    """Get stock data + technical indicators from Yahoo Finance"""
-    sym = symbol.upper().strip()
-    # Try NSE first, then BSE
-    for suffix in [".NS", ".BO", ""]:
-        try:
-            ticker = yf.Ticker(sym + suffix)
-            df = ticker.history(period="6mo", interval="1d", auto_adjust=False)
-            if df is not None and not df.empty:
-                info = ticker.info or {}
-                close = df["Close"]
-                rsi = compute_rsi(close)
-                sma20 = compute_sma(close, 20)
-                sma50 = compute_sma(close, 50)
-                sma200 = compute_sma(close, 200)
-                price = float(close.iloc[-1])
-                prev_close = float(close.iloc[-2]) if len(close) > 1 else price
-                signal_data = get_signal(price, sma20, sma50, rsi) if sma20 and sma50 else {"signal": "HOLD", "confidence": 50}
-                return {
-                    "symbol": sym,
-                    "suffix": suffix,
-                    "name": info.get("longName") or info.get("shortName") or sym,
-                    "price": round(price, 2),
-                    "prev_close": round(prev_close, 2),
-                    "change_pct": round(((price - prev_close) / prev_close) * 100, 2),
-                    "open": round(float(df["Open"].iloc[-1]), 2),
-                    "high": round(float(df["High"].iloc[-1]), 2),
-                    "low": round(float(df["Low"].iloc[-1]), 2),
-                    "volume": int(df["Volume"].iloc[-1]),
-                    "market_cap": info.get("marketCap"),
-                    "pe_ratio": info.get("trailingPE"),
-                    "eps": info.get("trailingEps"),
-                    "sector": info.get("sector"),
-                    "industry": info.get("industry"),
-                    "rsi14": round(rsi, 2),
-                    "sma20": round(sma20, 2) if sma20 else None,
-                    "sma50": round(sma50, 2) if sma50 else None,
-                    "sma200": round(sma200, 2) if sma200 else None,
-                    "signal": signal_data["signal"],
-                    "confidence": signal_data["confidence"],
-                    "closes": [round(float(v), 2) for v in close.tail(90).tolist()],
-                    "volumes": [int(v) for v in df["Volume"].tail(90).tolist()],
-                }
-        except Exception as e:
-            continue
-    raise HTTPException(status_code=404, detail=f"Stock {symbol} not found")
+@app.get("/search")
+async def search_stock(q: str = Query(..., min_length=1)):
+    """Search for stocks in NIFTY50"""
+    q = q.strip().upper()
+    results = [s for s in NIFTY50 if q in s]
+    return {"query": q, "results": results[:10], "count": len(results)}
 
-
-@app.get("/api/stocks/batch")
-async def get_batch_stocks(symbols: str = "RELIANCE,TCS,HDFCBANK,INFY,ICICIBANK"):
-    """Get multiple stocks at once"""
-    syms = [s.strip().upper() for s in symbols.split(",")][:20]
-    results = {}
-    for sym in syms:
-        try:
-            ticker = yf.Ticker(sym + ".NS")
-            df = ticker.history(period="5d", interval="1d", auto_adjust=False)
-            if df is not None and not df.empty:
-                close = df["Close"]
-                price = float(close.iloc[-1])
-                prev = float(close.iloc[-2]) if len(close) > 1 else price
-                results[sym] = {
-                    "price": round(price, 2),
-                    "change_pct": round(((price - prev) / prev) * 100, 2),
-                    "closes": [round(float(v), 2) for v in close.tolist()],
-                }
-        except Exception:
-            pass
-    return results
-
-
-@app.post("/api/analyze/{symbol}")
-async def analyze_stock_stream(symbol: str, agent: str = "final"):
-    """Stream AI analysis for a stock from a specific agent"""
-    sym = symbol.upper()
-    system_prompt = AGENT_PROMPTS.get(agent, AGENT_PROMPTS["final"])
-
-    # Try to get stock data for context
-    context = f"Stock: {sym} (NSE India)"
+@app.get("/analyze/{symbol}")
+async def analyze_stock(symbol: str, period: str = "6mo"):
+    """Comprehensive stock analysis with multi-agent debate"""
+    symbol = normalize_symbol(symbol)
+    
     try:
-        ticker = yf.Ticker(sym + ".NS")
-        df = ticker.history(period="3mo", interval="1d", auto_adjust=False)
-        if df is not None and not df.empty:
-            close = df["Close"]
-            price = float(close.iloc[-1])
-            prev = float(close.iloc[-2]) if len(close) > 1 else price
-            rsi = compute_rsi(close)
-            sma20 = compute_sma(close, 20)
-            sma50 = compute_sma(close, 50)
-            info = ticker.info or {}
-            context = f"""Stock: {info.get('longName', sym)} ({sym})
-Exchange: NSE India
-Current Price: ₹{price:.2f}
-Change: {((price - prev) / prev * 100):.2f}%
-52W High: ₹{info.get('fiftyTwoWeekHigh', 'N/A')}
-52W Low: ₹{info.get('fiftyTwoWeekLow', 'N/A')}
-RSI (14): {rsi:.1f}
-SMA 20: ₹{sma20:.2f if sma20 else 'N/A'}
-SMA 50: ₹{sma50:.2f if sma50 else 'N/A'}
-Volume Today: {int(df['Volume'].iloc[-1]):,}
-Market Cap: ₹{info.get('marketCap', 0) / 1e7:.0f} Cr
-P/E Ratio: {info.get('trailingPE', 'N/A')}
-Sector: {info.get('sector', 'N/A')}
-Industry: {info.get('industry', 'N/A')}"""
-    except Exception:
-        pass
+        # Fetch data
+        df = fetch_stock_data(symbol, period)
+        fund = get_fundamentals(symbol)
+        tech = build_technical_signal(df)
+        
+        # Extract metrics
+        close = pd.to_numeric(df["Close"], errors="coerce").dropna()
+        cmp = float(scalar(close.iloc[-1]))
+        prev_close = float(scalar(close.iloc[-2])) if len(close) > 1 else cmp
+        day_change_pct = ((cmp - prev_close) / prev_close * 100) if prev_close != 0 else 0
+        
+        week52_high = float(close.tail(252).max())
+        week52_low = float(close.tail(252).min())
+        
+        metrics = {
+            "cmp": round(cmp, 2),
+            "pe_ratio": fund.get("pe_ratio"),
+            "pb_ratio": fund.get("pb_ratio"),
+            "dividend_yield": fund.get("dividend_yield"),
+            "market_cap": fund.get("market_cap"),
+            "day_change": f"{round(day_change_pct, 2)}%",
+            "week52_high": round(week52_high, 2),
+            "week52_low": round(week52_low, 2),
+        }
+        
+        technical = {
+            "signal": tech["signal"],
+            "rsi": tech["rsi"],
+            "sma20": tech["sma20"],
+            "sma50": tech["sma50"],
+            "confidence": tech["confidence"]
+        }
+        
+        # Multi-agent AI analysis
+        data_context = f"""
+Stock: {symbol}
+CMP: ₹{cmp}
+PE Ratio: {metrics['pe_ratio']}
+Market Cap: {metrics['market_cap']}
+52W High/Low: ₹{week52_high} / ₹{week52_low}
+RSI: {tech['rsi']} | SMA20: {tech['sma20']} | SMA50: {tech['sma50']}
+"""
+        
+        agents = []
+        for agent_name, prompt in AGENT_PROMPTS.items():
+            try:
+                ai_response = await call_nvidia_ai([
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": data_context}
+                ])
+                parsed = parse_agent_response(ai_response)
+                agents.append({
+                    "agent": agent_name,
+                    "signal": parsed["signal"],
+                    "analysis": parsed["analysis"],
+                    "confidence": parsed["confidence"]
+                })
+            except Exception as e:
+                print(f"Agent {agent_name} error: {e}")
+        
+        return {
+            "ticker": symbol,
+            "name": fund.get("name", symbol),
+            "metrics": metrics,
+            "technical": technical,
+            "agents": agents,
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    async def generate():
-        async for chunk in stream_nvidia(
-            [{"role": "user", "content": f"Analyze this Indian stock now:\n\n{context}"}],
-            system=system_prompt,
-        ):
-            yield f"data: {json.dumps({'content': chunk})}\n\n"
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(generate(), media_type="text/event-stream")
-
-
-@app.post("/api/chat")
-async def chat_stream(payload: dict):
-    """Stream chat response from AI copilot"""
-    messages = payload.get("messages", [])
-    system = """You are an elite Indian stock market AI assistant — the best in the business.
-You have deep expertise in NSE, BSE, F&O, derivatives, technical analysis, fundamental analysis, macro, and quantitative strategies.
-You embody the best of: Warren Buffett, Rakesh Jhunjhunwala, Aswath Damodaran, Michael Burry, and Nassim Taleb — all applied to Indian markets.
-The user is 26 years old, based in India, actively trading NSE/BSE, wants to make profit.
-Always give: specific stock names, price levels, entry/exit zones, risk management, and actionable insights.
-Be institutional-grade but clear."""
-
-    async def generate():
-        async for chunk in stream_nvidia(messages, system=system):
-            yield f"data: {json.dumps({'content': chunk})}\n\n"
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(generate(), media_type="text/event-stream")
-
-
-@app.get("/api/market/overview")
-async def market_overview():
-    """Get overall market data"""
-    indices = {
-        "NIFTY50": "^NSEI",
-        "SENSEX": "^BSESN",
-        "NIFTYBANK": "^NSEBANK",
-        "NIFTYMIDCAP": "NIFTYMIDCAP100.NS",
-        "VIX": "^INDIAVIX",
-    }
-    result = {}
-    for name, ticker_sym in indices.items():
+@app.get("/nifty50")
+async def nifty50_analysis():
+    """Quick analysis of NIFTY50 stocks"""
+    results = []
+    for symbol in NIFTY50[:10]:  # Top 10
         try:
-            t = yf.Ticker(ticker_sym)
-            df = t.history(period="2d", interval="1d")
-            if df is not None and not df.empty:
-                price = float(df["Close"].iloc[-1])
-                prev = float(df["Close"].iloc[-2]) if len(df) > 1 else price
-                result[name] = {
-                    "price": round(price, 2),
-                    "change_pct": round(((price - prev) / prev) * 100, 2),
-                }
-        except Exception:
+            df = fetch_stock_data(symbol, "1mo")
+            close = pd.to_numeric(df["Close"], errors="coerce").dropna()
+            cmp = float(close.iloc[-1])
+            prev_close = float(close.iloc[-2]) if len(close) > 1 else cmp
+            change_pct = ((cmp - prev_close) / prev_close * 100) if prev_close != 0 else 0
+            
+            results.append({
+                "ticker": symbol,
+                "cmp": round(cmp, 2),
+                "change": f"{round(change_pct, 2)}%",
+                "rsi": round(float(scalar(compute_rsi(close).iloc[-1])), 2)
+            })
+        except:
             pass
-    return result
+    
+    return {"nifty50_snapshot": results, "timestamp": datetime.now().isoformat()}
 
+@app.get("/watchlist")
+async def watchlist(symbols: str = "RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS"):
+    """Get watchlist analysis"""
+    items = []
+    for symbol in symbols.split(","):
+        try:
+            result = await analyze_stock(normalize_symbol(symbol.strip()))
+            items.append(result)
+        except:
+            pass
+    return {"watchlist": items}
 
-# ── Telegram Calls ────────────────────────────────────────────────────────────
-
-class TelegramCall(BaseModel):
-    channel: str
-    call: str
-    call_type: str = "BUY"
-
-
-@app.get("/api/telegram/calls")
-async def get_telegram_calls():
-    return TELEGRAM_CALLS
-
-
-@app.post("/api/telegram/calls")
-async def add_telegram_call(payload: TelegramCall):
-    call = {
-        "channel": payload.channel,
-        "call": payload.call,
-        "call_type": payload.call_type,
-        "time": datetime.now().strftime("%H:%M"),
-        "date": datetime.now().strftime("%Y-%m-%d"),
+@app.get("/news")
+async def get_market_news():
+    """Get market news"""
+    return {
+        "news": [
+            {"title": "Markets reach all-time high", "source": "Economic Times", "timestamp": datetime.now().isoformat()},
+            {"title": "RBI holds rates steady", "source": "Times of India", "timestamp": datetime.now().isoformat()},
+            {"title": "FII inflows surge", "source": "Hindustan Times", "timestamp": datetime.now().isoformat()},
+        ]
     }
-    TELEGRAM_CALLS.insert(0, call)
-    return {"status": "added", "call": call}
 
-
-# ── News (scraped headlines) ──────────────────────────────────────────────────
-
-@app.get("/api/news")
-async def get_news():
-    """Return curated news for Indian markets"""
-    # In production, connect to NewsAPI or scrape TOI/HT/ET
-    return [
-        {"title": "RBI holds repo rate, signals accommodative stance for growth", "source": "Times of India", "time": "2h ago", "impact": "positive", "stocks": ["SBIN", "HDFCBANK", "ICICIBANK"]},
-        {"title": "Reliance Industries unveils ₹75,000 Cr green energy capex plan", "source": "Hindustan Times", "time": "3h ago", "impact": "positive", "stocks": ["RELIANCE"]},
-        {"title": "IT sector Q4 results: TCS, Infosys beat estimates", "source": "Economic Times", "time": "4h ago", "impact": "positive", "stocks": ["TCS", "INFY"]},
-        {"title": "FII inflows surge ₹8,200 Cr as global risk appetite returns", "source": "Mint", "time": "5h ago", "impact": "positive", "stocks": ["NIFTY"]},
-        {"title": "Adani Group stocks under pressure after short-seller report", "source": "NDTV Business", "time": "6h ago", "impact": "negative", "stocks": ["ADANIENT", "ADANIPORTS"]},
-        {"title": "SEBI tightens F&O rules: New position limits from next month", "source": "Business Standard", "time": "8h ago", "impact": "neutral", "stocks": ["ALL"]},
-        {"title": "Auto sector sees strong retail sales in March, Maruti leads", "source": "ET Auto", "time": "10h ago", "impact": "positive", "stocks": ["MARUTI", "TATAMOTORS"]},
-        {"title": "Pharma sector on watch: US FDA inspection results expected", "source": "Pharma Times", "time": "12h ago", "impact": "neutral", "stocks": ["SUNPHARMA", "DRREDDY", "CIPLA"]},
-    ]
-
+# ─────────────────────────────────────────────────────────────────────────────
+# RUN
+# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import uvicorn
