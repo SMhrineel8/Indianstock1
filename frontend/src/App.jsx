@@ -25,7 +25,7 @@ async function callNvidiaStream(messages, onChunk) {
       Authorization: `Bearer ${NVIDIA_API_KEY}` 
     },
     body: JSON.stringify({
-      model: "meta/llama-3.1-405b-instruct", // Updated to a live valid Nvidia API catalog fallback
+      model: "meta/llama-3.1-405b-instruct", 
       messages,
       temperature: 0.7,
       top_p: 1,
@@ -59,11 +59,9 @@ async function callNvidiaStream(messages, onChunk) {
 
 async function fetchStockData(symbol) {
   try {
-    // Uses your configured local proxy endpoint to safely query Yahoo without CORS blocks
     const url = `/api/stock/${symbol}`; 
     const r = await fetch(url);
     if (!r.ok) {
-      // Fallback directly to Yahoo Query if backend path differs
       const directUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}.NS?interval=1d&range=6mo`;
       const fallbackRes = await fetch(directUrl);
       const d = await fallbackRes.json();
