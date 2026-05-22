@@ -3,7 +3,7 @@ from openai import OpenAI
 
 def generate_stock_summary(ticker: str, metrics: dict) -> str:
     # Looks up the environment variable KEYS configured on your Render dashboard
-    api_key = os.getenv("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")
+    api_key = os.getenv("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")
     base_url = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 
     if not api_key:

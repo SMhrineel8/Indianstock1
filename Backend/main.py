@@ -37,7 +37,9 @@ app.add_middleware(
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 
-NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "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")
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
+if not NVIDIA_API_KEY:
+    raise RuntimeError("❌ NVIDIA_API_KEY environment variable is missing. Set it in Render dashboard.")
 NVIDIA_BASE = "https://integrate.api.nvidia.com/v1"
 
 NIFTY50 = [
