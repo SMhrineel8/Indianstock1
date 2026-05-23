@@ -1,11 +1,80 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import "./App.css";
+import api from "./api";
 
 export default function App() {
   const [timeframe, setTimeframe] = useState("1M");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [selectedStock, setSelectedStock] = useState(null);
+  const [stockData, setStockData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
 
-  // Dummy data for sections
-  const selectedStock = {
+  // Default stock on load
+  useEffect(() => {
+    loadStock("GRASIM.NS");
+  }, []);
+
+  // Search stocks
+  const handleSearch = async (query) => {
+    setSearchQuery(query);
+    setError("");
+    
+    if (query.trim().length === 0) {
+      setSearchResults([]);
+      setShowSearchDropdown(false);
+      return;
+    }
+
+    try {
+      const result = await api.searchStock(query);
+      setSearchResults(result.results || []);
+      setShowSearchDropdown(true);
+      
+      if (!result.results || result.results.length === 0) {
+        setError(result.message || "No stocks found");
+      }
+    } catch (err) {
+      setError("Backend error. Check if https://indianstock1.onrender.com is running");
+      console.error(err);
+    }
+  };
+
+  // Load stock analysis
+  const loadStock = async (symbol) => {
+    setLoading(true);
+    setError("");
+    setShowSearchDropdown(false);
+    
+    try {
+      const normalized = api.normalizeSymbol(symbol);
+      const result = await api.analyzeStock(normalized);
+      setStockData(result);
+      setSelectedStock(result.ticker);
+      setSearchQuery(result.ticker.replace(".NS", ""));
+    } catch (err) {
+      setError(`Stock not found: ${symbol}`);
+      console.error(err);
+      showDemoData();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Show demo data fallback
+  const showDemoData = () => {
+    setStockData(null); // Clear to show demo
+  };
+
+  // Select from dropdown
+  const selectStock = (symbol) => {
+    loadStock(symbol);
+  };
+
+  // Demo stock data
+  const dummySelectedStock = {
     ticker: "GRASIM",
     name: "Grasim Industries Ltd",
     cmp: 3154.50,
@@ -98,25 +167,59 @@ export default function App() {
         </div>
         <div className="navbar-right">
           <div className="search-header">
-            <input type="text" placeholder="Search stocks, indices, ETFs..." className="search-input-header" />
+            <input
+              type="text"
+              placeholder="Search stocks, indices, ETFs..."
+              className="search-input-header"
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+              onFocus={() => setShowSearchDropdown(searchResults.length > 0)}
+            />
             <span className="search-icon">🔍</span>
+            
+            {/* Search Dropdown */}
+            {showSearchDropdown && searchResults.length > 0 && (
+              <div className="search-dropdown">
+                {searchResults.map((symbol) => (
+                  <div
+                    key={symbol}
+                    className="search-item"
+                    onClick={() => selectStock(symbol)}
+                  >
+                    {symbol}
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            {/* Error Message */}
+            {error && (
+              <div className="search-error" title={error}>
+                ⚠️ Stock not found
+              </div>
+            )}
           </div>
           <button className="user-btn">SK</button>
         </div>
       </nav>
 
+      {/* Loading Indicator */}
+      {loading && <div className="loading-indicator">Loading stock data...</div>}
+
       {/* Stock Header Info */}
       <div className="stock-header-info">
         <div className="stock-info-left">
           <div className="stock-name">
-            <h2>{selectedStock.name}</h2>
-            <span className="stock-ticker">{selectedStock.ticker}</span>
+            <h2>{stockData?.name || dummySelectedStock.name}</h2>
+            <span className="stock-ticker">{stockData?.ticker || dummySelectedStock.ticker}</span>
             <span className="stock-exchange">NSE</span>
           </div>
         </div>
         <div className="stock-price-section">
-          <div className="current-price">₹{selectedStock.cmp.toFixed(2)}</div>
-          <div className="price-change up">{selectedStock.change}</div>
+          <div className="current-price">₹{(stockData?.metrics?.cmp || dummySelectedStock.cmp).toFixed(2)}</div>
+          <div className={`price-change ${(stockData?.metrics?.day_change || dummySelectedStock.change).includes("+") ? "up" : "down"}`}>
+            {stockData?.metrics?.day_change || dummySelectedStock.change}
+          </div>
           <div className="action-buttons">
             <button className="btn-buy">Buy for the Day</button>
             <button className="btn-hold">Hold</button>
@@ -137,55 +240,56 @@ export default function App() {
           <div className="metrics-card">
             <h4>Key Metrics</h4>
             <div className="metric-row">
-              <span className="metric-label">High</span>
-              <span className="metric-value">₹{selectedStock.high}</span>
+              <span className="metric-label">High (52W)</span>
+              <span className="metric-value">₹{(stockData?.metrics?.week52_high || 3511.96).toFixed(2)}</span>
             </div>
             <div className="metric-row">
-              <span className="metric-label">Low</span>
-              <span className="metric-value">₹{selectedStock.low}</span>
+              <span className="metric-label">Low (52W)</span>
+              <span className="metric-value">₹{(stockData?.metrics?.week52_low || 2076.15).toFixed(2)}</span>
             </div>
             <div className="metric-row">
-              <span className="metric-label">Open</span>
-              <span className="metric-value">₹{selectedStock.open}</span>
+              <span className="metric-label">P/E Ratio</span>
+              <span className="metric-value">{stockData?.metrics?.pe_ratio?.toFixed(2) || "N/A"}</span>
             </div>
             <div className="metric-row">
-              <span className="metric-label">Volume</span>
-              <span className="metric-value">{selectedStock.volume}</span>
+              <span className="metric-label">Div. Yield</span>
+              <span className="metric-value">{stockData?.metrics?.dividend_yield ? (stockData.metrics.dividend_yield * 100).toFixed(2) + "%" : "N/A"}</span>
+            </div>
+            <div className="metric-row">
+              <span className="metric-label">P/B Ratio</span>
+              <span className="metric-value">{stockData?.metrics?.pb_ratio?.toFixed(2) || "N/A"}</span>
             </div>
             <div className="metric-row">
               <span className="metric-label">Market Cap</span>
-              <span className="metric-value">{selectedStock.marketCap}</span>
-            </div>
-            <div className="metric-row">
-              <span className="metric-label">P/E</span>
-              <span className="metric-value">{selectedStock.pe}</span>
+              <span className="metric-value">{stockData?.metrics?.market_cap ? "₹" + (stockData.metrics.market_cap / 10000000000).toFixed(0) + "Cr" : "N/A"}</span>
             </div>
           </div>
 
           {/* AI Sentiment */}
           <div className="sentiment-card">
-            <h4>AI Sentiment Analysis</h4>
+            <h4>AI Signal Analysis</h4>
             <div className="sentiment-score">
-              <div className="score-number">68</div>
-              <div className="score-label">Bullish</div>
+              <div className="score-number">{stockData?.technical?.rsi || 68}</div>
+              <div className="score-label">{stockData?.technical?.signal || "BUY"}</div>
             </div>
             <div className="sentiment-items">
-              <div className="sentiment-item">
-                <span className="sentiment-label">News Sentiment</span>
-                <span className="sentiment-badge positive">Positive</span>
-              </div>
-              <div className="sentiment-item">
-                <span className="sentiment-label">Analyst Sentiment</span>
-                <span className="sentiment-badge bullish">Bullish</span>
-              </div>
-              <div className="sentiment-item">
-                <span className="sentiment-label">Social Sentiment</span>
-                <span className="sentiment-badge neutral">Neutral</span>
-              </div>
-              <div className="sentiment-item">
-                <span className="sentiment-label">Technical Sentiment</span>
-                <span className="sentiment-badge bullish">Bullish</span>
-              </div>
+              {stockData?.agents?.map((agent) => (
+                <div key={agent.agent} className="sentiment-item">
+                  <span className="sentiment-label">{agent.agent}</span>
+                  <span className={`sentiment-badge ${agent.signal.toLowerCase()}`}>{agent.signal}</span>
+                </div>
+              )) || (
+                <>
+                  <div className="sentiment-item">
+                    <span className="sentiment-label">Technical</span>
+                    <span className="sentiment-badge bullish">Bullish</span>
+                  </div>
+                  <div className="sentiment-item">
+                    <span className="sentiment-label">Fundamental</span>
+                    <span className="sentiment-badge bullish">Bullish</span>
+                  </div>
+                </>
+              )}
             </div>
             <button className="view-details-btn">View detailed analysis →</button>
           </div>
