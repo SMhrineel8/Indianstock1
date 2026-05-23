@@ -1,80 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import "./App.css";
 import api from "./api";
 
 export default function App() {
   const [timeframe, setTimeframe] = useState("1M");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState([]);
-  const [selectedStock, setSelectedStock] = useState(null);
-  const [stockData, setStockData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
 
-  // Default stock on load
-  useEffect(() => {
-    loadStock("GRASIM.NS");
-  }, []);
-
-  // Search stocks
-  const handleSearch = async (query) => {
-    setSearchQuery(query);
-    setError("");
-    
-    if (query.trim().length === 0) {
-      setSearchResults([]);
-      setShowSearchDropdown(false);
-      return;
-    }
-
-    try {
-      const result = await api.searchStock(query);
-      setSearchResults(result.results || []);
-      setShowSearchDropdown(true);
-      
-      if (!result.results || result.results.length === 0) {
-        setError(result.message || "No stocks found");
-      }
-    } catch (err) {
-      setError("Backend error. Check if https://indianstock1.onrender.com is running");
-      console.error(err);
-    }
-  };
-
-  // Load stock analysis
-  const loadStock = async (symbol) => {
-    setLoading(true);
-    setError("");
-    setShowSearchDropdown(false);
-    
-    try {
-      const normalized = api.normalizeSymbol(symbol);
-      const result = await api.analyzeStock(normalized);
-      setStockData(result);
-      setSelectedStock(result.ticker);
-      setSearchQuery(result.ticker.replace(".NS", ""));
-    } catch (err) {
-      setError(`Stock not found: ${symbol}`);
-      console.error(err);
-      showDemoData();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Show demo data fallback
-  const showDemoData = () => {
-    setStockData(null); // Clear to show demo
-  };
-
-  // Select from dropdown
-  const selectStock = (symbol) => {
-    loadStock(symbol);
-  };
-
-  // Demo stock data
-  const dummySelectedStock = {
+  // Dummy data for sections
+  const selectedStock = {
     ticker: "GRASIM",
     name: "Grasim Industries Ltd",
     cmp: 3154.50,
@@ -141,85 +73,66 @@ export default function App() {
     { price: "₹567.45", target: "78%", upside: "AMBUJA", confidence: "75%" }
   ];
 
-  const watchlist = [
-    { ticker: "RELIANCE", exchange: "NSE", price: "₹2,856.75", change: "+0.65%", icon: "📊" },
-    { ticker: "INFY", exchange: "NSE", price: "₹1,614.80", change: "+0.32%", icon: "📈" },
-    { ticker: "HDFCBANK", exchange: "NSE", price: "₹1,721.45", change: "+0.15%", icon: "🏦" },
-    { ticker: "SBIN", exchange: "NSE", price: "₹812.35", change: "+0.25%", icon: "🏛️" }
-  ];
+  const handleSubmit = (e, symbol = input) => {
+    e?.preventDefault?.();
+    const trimmed = String(symbol || "").trim();
+    if (!trimmed) return;
+    onSearch(trimmed.toUpperCase());
+    setInput("");
+    setSuggestions([]);
+  };
 
   return (
-    <div className="app">
-      {/* Navigation Header */}
-      <nav className="navbar">
-        <div className="navbar-left">
-          <div className="logo">⚡ BHARAT TERMINAL</div>
-        </div>
-        <div className="nav-tabs">
-          <button className="nav-tab active">Terminal</button>
-          <button className="nav-tab">AI Analysis</button>
-          <button className="nav-tab">Markets</button>
-          <button className="nav-tab">News Intel</button>
-          <button className="nav-tab">Expert Calls</button>
-          <button className="nav-tab">AI Copilot</button>
-          <button className="nav-tab">Screener</button>
-          <button className="nav-tab">Watchlist</button>
+    <div className="search-container">
+      <form onSubmit={handleSubmit} className="search-bar">
+        <input
+          type="text"
+          value={input}
+          onChange={handleChange}
+          placeholder="Search stock (e.g., RELIANCE, TCS, INFY)..."
+          className="search-input"
+          disabled={loading}
+        />
+        <button type="submit" className="search-btn" disabled={loading}>
+          {loading ? "Analyzing..." : "Search"}
+        </button>
+      </form>
+
+      {suggestions.length > 0 && (
+        <div className="suggestions">
+          {suggestions.map((s) => (
+            <div
+              key={s}
+              className="suggestion-item"
+              onClick={() => handleSubmit(null, s)}
+              role="button"
+              tabIndex={0}
+            >
+              {s}
+            </div>
+          ))}
         </div>
         <div className="navbar-right">
           <div className="search-header">
-            <input
-              type="text"
-              placeholder="Search stocks, indices, ETFs..."
-              className="search-input-header"
-              value={searchQuery}
-              onChange={(e) => handleSearch(e.target.value)}
-              onFocus={() => setShowSearchDropdown(searchResults.length > 0)}
-            />
+            <input type="text" placeholder="Search stocks, indices, ETFs..." className="search-input-header" />
             <span className="search-icon">🔍</span>
-            
-            {/* Search Dropdown */}
-            {showSearchDropdown && searchResults.length > 0 && (
-              <div className="search-dropdown">
-                {searchResults.map((symbol) => (
-                  <div
-                    key={symbol}
-                    className="search-item"
-                    onClick={() => selectStock(symbol)}
-                  >
-                    {symbol}
-                  </div>
-                ))}
-              </div>
-            )}
-            
-            {/* Error Message */}
-            {error && (
-              <div className="search-error" title={error}>
-                ⚠️ Stock not found
-              </div>
-            )}
           </div>
           <button className="user-btn">SK</button>
         </div>
       </nav>
 
-      {/* Loading Indicator */}
-      {loading && <div className="loading-indicator">Loading stock data...</div>}
-
       {/* Stock Header Info */}
       <div className="stock-header-info">
         <div className="stock-info-left">
           <div className="stock-name">
-            <h2>{stockData?.name || dummySelectedStock.name}</h2>
-            <span className="stock-ticker">{stockData?.ticker || dummySelectedStock.ticker}</span>
+            <h2>{selectedStock.name}</h2>
+            <span className="stock-ticker">{selectedStock.ticker}</span>
             <span className="stock-exchange">NSE</span>
           </div>
         </div>
         <div className="stock-price-section">
-          <div className="current-price">₹{(stockData?.metrics?.cmp || dummySelectedStock.cmp).toFixed(2)}</div>
-          <div className={`price-change ${(stockData?.metrics?.day_change || dummySelectedStock.change).includes("+") ? "up" : "down"}`}>
-            {stockData?.metrics?.day_change || dummySelectedStock.change}
-          </div>
+          <div className="current-price">₹{selectedStock.cmp.toFixed(2)}</div>
+          <div className="price-change up">{selectedStock.change}</div>
           <div className="action-buttons">
             <button className="btn-buy">Buy for the Day</button>
             <button className="btn-hold">Hold</button>
@@ -240,284 +153,311 @@ export default function App() {
           <div className="metrics-card">
             <h4>Key Metrics</h4>
             <div className="metric-row">
-              <span className="metric-label">High (52W)</span>
-              <span className="metric-value">₹{(stockData?.metrics?.week52_high || 3511.96).toFixed(2)}</span>
+              <span className="metric-label">High</span>
+              <span className="metric-value">₹{selectedStock.high}</span>
             </div>
             <div className="metric-row">
-              <span className="metric-label">Low (52W)</span>
-              <span className="metric-value">₹{(stockData?.metrics?.week52_low || 2076.15).toFixed(2)}</span>
+              <span className="metric-label">Low</span>
+              <span className="metric-value">₹{selectedStock.low}</span>
             </div>
             <div className="metric-row">
-              <span className="metric-label">P/E Ratio</span>
-              <span className="metric-value">{stockData?.metrics?.pe_ratio?.toFixed(2) || "N/A"}</span>
+              <span className="metric-label">Open</span>
+              <span className="metric-value">₹{selectedStock.open}</span>
             </div>
             <div className="metric-row">
-              <span className="metric-label">Div. Yield</span>
-              <span className="metric-value">{stockData?.metrics?.dividend_yield ? (stockData.metrics.dividend_yield * 100).toFixed(2) + "%" : "N/A"}</span>
-            </div>
-            <div className="metric-row">
-              <span className="metric-label">P/B Ratio</span>
-              <span className="metric-value">{stockData?.metrics?.pb_ratio?.toFixed(2) || "N/A"}</span>
+              <span className="metric-label">Volume</span>
+              <span className="metric-value">{selectedStock.volume}</span>
             </div>
             <div className="metric-row">
               <span className="metric-label">Market Cap</span>
-              <span className="metric-value">{stockData?.metrics?.market_cap ? "₹" + (stockData.metrics.market_cap / 10000000000).toFixed(0) + "Cr" : "N/A"}</span>
+              <span className="metric-value">{selectedStock.marketCap}</span>
+            </div>
+            <div className="metric-row">
+              <span className="metric-label">P/E</span>
+              <span className="metric-value">{selectedStock.pe}</span>
             </div>
           </div>
 
           {/* AI Sentiment */}
           <div className="sentiment-card">
-            <h4>AI Signal Analysis</h4>
+            <h4>AI Sentiment Analysis</h4>
             <div className="sentiment-score">
-              <div className="score-number">{stockData?.technical?.rsi || 68}</div>
-              <div className="score-label">{stockData?.technical?.signal || "BUY"}</div>
+              <div className="score-number">68</div>
+              <div className="score-label">Bullish</div>
             </div>
             <div className="sentiment-items">
-              {stockData?.agents?.map((agent) => (
-                <div key={agent.agent} className="sentiment-item">
-                  <span className="sentiment-label">{agent.agent}</span>
-                  <span className={`sentiment-badge ${agent.signal.toLowerCase()}`}>{agent.signal}</span>
-                </div>
-              )) || (
-                <>
-                  <div className="sentiment-item">
-                    <span className="sentiment-label">Technical</span>
-                    <span className="sentiment-badge bullish">Bullish</span>
-                  </div>
-                  <div className="sentiment-item">
-                    <span className="sentiment-label">Fundamental</span>
-                    <span className="sentiment-badge bullish">Bullish</span>
-                  </div>
-                </>
-              )}
+              <div className="sentiment-item">
+                <span className="sentiment-label">News Sentiment</span>
+                <span className="sentiment-badge positive">Positive</span>
+              </div>
+              <div className="sentiment-item">
+                <span className="sentiment-label">Analyst Sentiment</span>
+                <span className="sentiment-badge bullish">Bullish</span>
+              </div>
+              <div className="sentiment-item">
+                <span className="sentiment-label">Social Sentiment</span>
+                <span className="sentiment-badge neutral">Neutral</span>
+              </div>
+              <div className="sentiment-item">
+                <span className="sentiment-label">Technical Sentiment</span>
+                <span className="sentiment-badge bullish">Bullish</span>
+              </div>
             </div>
             <button className="view-details-btn">View detailed analysis →</button>
           </div>
         </div>
-
-        {/* Center Content */}
-        <div className="center-content">
-          {/* Chart Section */}
-          <div className="chart-section">
-            <div className="chart-header">
-              <h3>Price Chart</h3>
-              <div className="timeframe-buttons">
-                {["1D", "1W", "1M", "1Y", "5Y", "Max"].map((tf) => (
-                  <button
-                    key={tf}
-                    className={`timeframe-btn ${timeframe === tf ? "active" : ""}`}
-                    onClick={() => setTimeframe(tf)}
-                  >
-                    {tf}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="chart-placeholder">
-              <div className="chart-dummy">📈 Chart Visualization ({timeframe})</div>
-            </div>
-          </div>
-
-          {/* Market Depth & Key Info Row */}
-          <div className="info-row">
-            {/* Market Depth */}
-            <div className="market-depth">
-              <h4>Market Depth</h4>
-              <table className="depth-table">
-                <thead>
-                  <tr>
-                    <th>Bid</th>
-                    <th>Orders</th>
-                    <th>Qty</th>
-                    <th>Qty</th>
-                    <th>Orders</th>
-                    <th>Ask</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {marketDepth.map((row, idx) => (
-                    <tr key={idx}>
-                      <td className="bid-price">{row.bid}</td>
-                      <td className="bid-qty">{row.bidQty}</td>
-                      <td className="qty">5,432</td>
-                      <td className="qty">3,210</td>
-                      <td className="ask-qty">{row.askQty}</td>
-                      <td className="ask-price">{row.ask}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Key Info */}
-            <div className="key-info">
-              <h4>Key Info</h4>
-              <div className="key-info-grid">
-                {Object.entries(keyInfo).map(([key, value]) => (
-                  <div key={key} className="info-item">
-                    <span className="info-label">{key}</span>
-                    <span className="info-value">{value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Performance & Financial Row */}
-          <div className="charts-row">
-            {/* Performance Comparison */}
-            <div className="performance-section">
-              <h4>Performance Comparison</h4>
-              <div className="performance-chart">
-                {performanceData.map((item, idx) => (
-                  <div key={idx} className="performance-item">
-                    <div className="perf-label">{item.label}</div>
-                    <div className="perf-chart-bar" style={{ height: `${Math.random() * 60 + 20}px` }}></div>
-                    <div className="perf-value">{item.value}</div>
-                    <div className="perf-change">{item.change}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Financial Summary */}
-            <div className="financial-section">
-              <h4>Financial Summary (Q4 FY26)</h4>
-              <div className="financial-items">
-                <div className="fin-item">
-                  <span className="fin-label">Revenue</span>
-                  <span className="fin-value">₹51,444 Cr</span>
-                </div>
-                <div className="fin-item">
-                  <span className="fin-label">Net Profit</span>
-                  <span className="fin-value">₹1,957 Cr</span>
-                </div>
-                <div className="fin-item">
-                  <span className="fin-label">EBITDA</span>
-                  <span className="fin-value">₹11,135 Cr</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Analyst Ratings */}
-          <div className="analyst-section">
-            <h4>Analyst Ratings</h4>
-            <div className="ratings-container">
-              <div className="rating-stat">
-                <div className="rating-percentage">100%</div>
-                <div className="rating-label">Buy</div>
-                <div className="rating-count">Based on {analystRatings.buyCount} analysts</div>
-              </div>
-              <div className="rating-bar-container">
-                <div className="rating-bar-bg">
-                  <div className="rating-bar-fill buy" style={{ width: "100%" }}></div>
-                </div>
-                <div className="rating-details">
-                  <span>Buy: {analystRatings.buyCount}</span>
-                  <span>Hold: {analystRatings.holdCount}</span>
-                  <span>Sell: {analystRatings.sellCount}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Upcoming Events */}
-          <div className="events-section">
-            <h4>Upcoming Events</h4>
-            <div className="events-grid">
-              {upcomingEvents.map((event, idx) => (
-                <div key={idx} className="event-card">
-                  <div className="event-date">
-                    <div className="date-day">{event.date}</div>
-                    <div className="date-month">{event.month}</div>
-                  </div>
-                  <div className="event-details">
-                    <div className="event-title">{event.title}</div>
-                    <div className="event-desc">{event.description}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* News Section */}
-          <div className="news-section">
-            <div className="section-header">
-              <h4>Latest News</h4>
-              <a href="#" className="view-all">View all news →</a>
-            </div>
-            <div className="news-list">
-              {latestNews.map((item, idx) => (
-                <div key={idx} className="news-item">
-                  <div className="news-content">
-                    <div className="news-title">{item.title}</div>
-                    <div className="news-meta">
-                      <span className="news-category">{item.category}</span>
-                      <span className="news-time">{item.time}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Expert Calls */}
-          <div className="expert-section">
-            <div className="section-header">
-              <h4>Expert Calls</h4>
-              <a href="#" className="view-all">View all calls →</a>
-            </div>
-            <div className="expert-grid">
-              {expertCalls.map((call, idx) => (
-                <div key={idx} className="expert-card">
-                  <div className="expert-price">{call.price}</div>
-                  <div className="expert-target">
-                    <span className="target-value">{call.target}</span>
-                    <span className="target-label">Target Price</span>
-                  </div>
-                  <div className="expert-info">
-                    <span className="expert-name">{call.upside}</span>
-                    <span className="expert-confidence">{call.confidence}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Right Sidebar - Watchlist */}
-        <div className="right-sidebar">
-          <div className="watchlist-panel">
-            <h4>Watchlist</h4>
-            <div className="watchlist-items">
-              {watchlist.map((item, idx) => (
-                <div key={idx} className="watchlist-item">
-                  <div className="watchlist-icon">{item.icon}</div>
-                  <div className="watchlist-details">
-                    <div className="watchlist-ticker">{item.ticker}</div>
-                    <div className="watchlist-exchange">{item.exchange}</div>
-                  </div>
-                  <div className="watchlist-price-info">
-                    <div className="watchlist-price">{item.price}</div>
-                    <div className="watchlist-change-val">{item.change}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* AI Insights */}
-          <div className="insights-panel">
-            <h4>AI Insights</h4>
-            <p className="insights-text">Grasim shows strong quarterly growth in cement and chemicals segment. AI models predict 12.4% upside potential in next 30 days based on technical momentum and fundamental strength.</p>
-            <div className="insights-buttons">
-              <button className="btn-ask-copilot">🤖 Ask AI Copilot</button>
-              <button className="btn-compare">👥 Compare with peers →</button>
-            </div>
-          </div>
-        </div>
       </div>
+    </div>
+  );
+}
+
+function AgentCard({ agent = {} }) {
+  return (
+    <div className="agent-card">
+      <div className="agent-header">
+        <span className="agent-name">{String(agent.agent || "").toUpperCase()}</span>
+        <SignalBadge signal={agent.signal} confidence={agent.confidence} />
+      </div>
+      <p className="agent-analysis">{agent.analysis || ""}</p>
+    </div>
+  );
+}
+
+function AgentsSection({ agents = [] }) {
+  return (
+    <div className="section agents-section">
+      <h3>Multi-Agent Consensus</h3>
+      <div className="agents-grid">
+        {agents.map((agent) => (
+          <AgentCard key={agent.agent || Math.random()} agent={agent} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Nifty50Snapshot() {
+  const [snapshot, setSnapshot] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchSnapshot = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/nifty50`);
+      if (!res.ok) throw new Error(`NIFTY50 fetch failed: ${res.status}`);
+      const data = await res.json();
+      setSnapshot(data);
+    } catch (err) {
+      console.error(err);
+      setSnapshot(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSnapshot();
+  }, []);
+
+  const rows = useMemo(() => snapshot?.nifty50_snapshot || [], [snapshot]);
+
+  return (
+    <div className="section nifty-section">
+      <div className="section-header">
+        <h3>NIFTY50 Snapshot</h3>
+        <button onClick={fetchSnapshot} disabled={loading} className="refresh-btn">
+          {loading ? "Loading..." : "Refresh"}
+        </button>
+      </div>
+
+      {rows.length > 0 && (
+        <div className="nifty-grid">
+          {rows.map((stock) => {
+            const change = String(stock.change || "0");
+            return (
+              <div key={stock.ticker} className="nifty-card">
+                <div className="nifty-ticker">{String(stock.ticker || "").replace(".NS", "")}</div>
+                <div className="nifty-cmp">₹{fmt(stock.cmp)}</div>
+                <div className={`nifty-change ${change.includes("-") ? "down" : "up"}`}>{change}</div>
+                <div className="nifty-rsi">RSI: {fmt(stock.rsi)}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NewsSection() {
+  const [news, setNews] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchNews = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/news`);
+      if (!res.ok) throw new Error(`News fetch failed: ${res.status}`);
+      const data = await res.json();
+      setNews(data);
+    } catch (err) {
+      console.error(err);
+      setNews(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchNews();
+  }, []);
+
+  return (
+    <div className="section news-section">
+      <div className="section-header">
+        <h3>Market News</h3>
+        <button onClick={fetchNews} disabled={loading} className="refresh-btn">
+          {loading ? "Loading..." : "Refresh"}
+        </button>
+      </div>
+
+      {news?.news && (
+        <div className="news-list">
+          {news.news.map((item, idx) => (
+            <div key={idx} className="news-item">
+              <div className="news-title">{item.title}</div>
+              <div className="news-meta">
+                <span className="news-source">{item.source}</span>
+                <span className="news-time">
+                  {item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : ""}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StockDetail({ stock, onClose }) {
+  return (
+    <div className="stock-detail">
+      <button className="close-btn" onClick={onClose}>
+        ✕
+      </button>
+      <div className="stock-header">
+        <h2>{stock?.ticker || "—"}</h2>
+        <h3>{stock?.name || ""}</h3>
+      </div>
+      <MetricsCard metrics={stock?.metrics || {}} />
+      <TechnicalSection technical={stock?.technical || {}} />
+      <AgentsSection agents={stock?.agents || []} />
+    </div>
+  );
+}
+
+export default function App() {
+  const [selectedStock, setSelectedStock] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const refreshLiveQuote = async (ticker) => {
+    if (!ticker) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/quote/${encodeURIComponent(ticker)}`, {
+        cache: "no-store",
+      });
+
+      if (!res.ok) return;
+
+      const q = await res.json();
+
+      setSelectedStock((prev) => {
+        if (!prev) return prev;
+
+        return {
+          ...prev,
+          metrics: {
+            ...prev.metrics,
+            cmp: q.cmp ?? prev.metrics?.cmp,
+            day_change:
+              q.day_change_pct != null ? `${q.day_change_pct}%` : prev.metrics?.day_change,
+          },
+        };
+      });
+    } catch (err) {
+      console.error("Live quote refresh failed:", err);
+    }
+  };
+
+  const handleSearch = async (symbol) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const clean = String(symbol || "").trim().toUpperCase();
+      if (!clean) throw new Error("Enter a stock symbol");
+
+      const res = await fetch(`${API_BASE}/analyze/${encodeURIComponent(clean)}`);
+
+      if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error(`Stock "${clean}" not found`);
+        }
+        throw new Error(`Server error: ${res.status}`);
+      }
+
+      const data = await res.json();
+      setSelectedStock(data);
+      refreshLiveQuote(data.ticker || clean);
+    } catch (err) {
+      console.error("Error:", err);
+      setError(err.message || "Failed to fetch stock data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedStock?.ticker) return;
+
+    refreshLiveQuote(selectedStock.ticker);
+
+    const interval = setInterval(() => {
+      refreshLiveQuote(selectedStock.ticker);
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [selectedStock?.ticker]);
+
+  return (
+    <div className="app">
+      <header className="app-header">
+        <div className="header-content">
+          <h1>BHARAT TERMINAL</h1>
+          <p>AI-Powered Institutional Intelligence for Indian Markets</p>
+        </div>
+      </header>
+
+      <main className="app-main">
+        <SearchBar onSearch={handleSearch} loading={loading} />
+        {error && <div className="error-message">{error}</div>}
+
+        {selectedStock ? (
+          <StockDetail stock={selectedStock} onClose={() => setSelectedStock(null)} />
+        ) : (
+          <>
+            <Nifty50Snapshot />
+            <NewsSection />
+          </>
+        )}
+      </main>
+
+      <footer className="app-footer">
+        <p>© 2024 Bharat Terminal | Live NSE/BSE Data | NVIDIA NIM AI</p>
+      </footer>
     </div>
   );
 }

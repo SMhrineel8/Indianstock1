@@ -1,29 +1,25 @@
-"""
-🚀 BHARAT TERMINAL - AI-POWERED INSTITUTIONAL INTELLIGENCE FOR INDIAN MARKETS
-Backend: FastAPI + Python + NVIDIA NIM + Yahoo Finance
-Live NSE/BSE data, Multi-agent AI debate, Trading strategies
-"""
-
 from __future__ import annotations
-import os, re, json, httpx, requests
+
+import os
+import httpx
+import requests
 from datetime import datetime
-from typing import List, Optional, Literal, Any
+from typing import Any
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import asyncio
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FASTAPI APP
 # ─────────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="⚡ Bharat Terminal API",
-    version="2.0.0",
-    description="Bloomberg-style terminal for Indian markets with NVIDIA NIM AI"
+    title="Bharat Terminal API",
+    version="2.1.0",
+    description="Bloomberg-style terminal for Indian markets with NVIDIA NIM AI",
 )
 
 app.add_middleware(
@@ -38,9 +34,10 @@ app.add_middleware(
 # ─────────────────────────────────────────────────────────────────────────────
 
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
-if not NVIDIA_API_KEY:
-    raise RuntimeError("❌ NVIDIA_API_KEY environment variable is missing. Set it in Render dashboard.")
 NVIDIA_BASE = "https://integrate.api.nvidia.com/v1"
+
+if not NVIDIA_API_KEY:
+    raise RuntimeError("NVIDIA_API_KEY environment variable is missing.")
 
 NIFTY50 = [
     "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
@@ -53,58 +50,63 @@ NIFTY50 = [
     "ADANIPORTS.NS", "TATACONSUM.NS", "SBILIFE.NS", "HDFC.NS", "APOLLOHOSP.NS",
 ]
 
-# AI Agent Prompts
+# Common variations mapped to valid Yahoo Finance National Stock Exchange codes
+TICKER_CORRECTIONS = {
+    "BANKOFBARODA": "BANKBARODA",
+    "BOB": "BANKBARODA",
+    "M&M": "M&M",
+    "BAJAJ-AUTO": "BAJAJ-AUTO",
+}
+
 AGENT_PROMPTS = {
     "technical": """You are an elite technical analyst for Indian NSE/BSE markets.
 Analyze the stock data and respond ONLY with:
 [SIGNAL]: BUY|SELL|HOLD
 [ANALYSIS]: 2-3 sentence technical analysis with key levels
 [CONFIDENCE]: 0-100""",
-
-    "fundamental": """You are a fundamental analyst using Warren Buffett + Rakesh Jhunjhunwala framework.
-For this Indian stock, respond ONLY with:
+    "fundamental": """You are a fundamental analyst using a value-investing framework.
+Respond ONLY with:
 [SIGNAL]: BUY|SELL|HOLD
 [ANALYSIS]: 2-3 sentences on valuation, business quality, and fair value
 [CONFIDENCE]: 0-100""",
-
-    "macro": """You are Chief Macro Strategist analyzing Indian markets (Bridgewater style).
+    "macro": """You are Chief Macro Strategist analyzing Indian markets.
 Respond ONLY with:
 [SIGNAL]: BUY|SELL|HOLD
-[ANALYSIS]: 2-3 sentences on sector tailwinds, FII flows, RBI, and macro risks
+[ANALYSIS]: 2-3 sentences on sector tailwinds, RBI, flows, and macro risks
 [CONFIDENCE]: 0-100""",
-
-    "sentiment": """You are a sentiment analyst tracking news and social signals for Indian markets.
+    "sentiment": """You are a sentiment analyst tracking news and market sentiment.
 Respond ONLY with:
 [SIGNAL]: BUY|SELL|HOLD
-[ANALYSIS]: 2-3 sentences on recent catalysts, news, and market sentiment
+[ANALYSIS]: 2-3 sentences on recent catalysts, news, and sentiment
 [CONFIDENCE]: 0-100""",
-
-    "risk": """You are a Risk Manager using Nassim Taleb's asymmetric risk framework.
+    "risk": """You are a Risk Manager using asymmetric risk analysis.
 Respond ONLY with:
 [SIGNAL]: BUY|SELL|HOLD
-[ANALYSIS]: 2-3 sentences on key risks, downside protection, and risk/reward
+[ANALYSIS]: 2-3 sentences on downside risks and risk/reward
 [CONFIDENCE]: 0-100""",
-
-    "options": """You are an institutional derivatives strategist (Citadel India desk).
+    "options": """You are a derivatives strategist.
 Respond ONLY with:
 [SIGNAL]: BUY_CALLS|BUY_PUTS|SELL_OPTIONS|HOLD
-[ANALYSIS]: 2-3 sentences on implied vol, best strategy, and greeks
+[ANALYSIS]: 2-3 sentences on implied vol, strategy, and greeks
 [CONFIDENCE]: 0-100""",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# UTILITY FUNCTIONS
+# UTILITIES
 # ─────────────────────────────────────────────────────────────────────────────
 
 def normalize_symbol(symbol: str) -> str:
-    """Normalize stock symbol to NSE format"""
+    """Cleans up search input strings and converts them into valid Yahoo Finance NSE codes."""
     symbol = symbol.strip().upper()
-    if not symbol.endswith((".NS", ".BO")):
-        symbol = f"{symbol}.NS"
-    return symbol
+    symbol = symbol.replace(".NS", "").replace(".BO", "").replace(" ", "")
+    
+    # Correct names like BANKOFBARODA into official ticker IDs like BANKBARODA
+    if symbol in TICKER_CORRECTIONS:
+        symbol = TICKER_CORRECTIONS[symbol]
+        
+    return f"{symbol}.NS"
 
 def scalar(value: Any) -> Any:
-    """Convert pandas/numpy to scalar"""
     if isinstance(value, pd.Series):
         return value.iloc[0]
     if isinstance(value, np.ndarray):
@@ -112,7 +114,6 @@ def scalar(value: Any) -> Any:
     return value
 
 def compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
-    """Compute RSI"""
     close = pd.to_numeric(close, errors="coerce")
     delta = close.diff()
     gain = delta.clip(lower=0)
@@ -123,40 +124,56 @@ def compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     rsi = 100 - (100 / (1 + rs))
     return rsi.fillna(50)
 
+def parse_agent_response(response: str) -> dict:
+    signal = "HOLD"
+    confidence = 50
+    analysis = response.strip()
+
+    try:
+        if "[SIGNAL]:" in response:
+            signal_line = response.split("[SIGNAL]:", 1)[1].split("\n", 1)[0].strip()
+            signal = signal_line.split("|")[0].strip()
+        if "[CONFIDENCE]:" in response:
+            conf_line = response.split("[CONFIDENCE]:", 1)[1].split("\n", 1)[0].strip()
+            confidence = int(conf_line)
+        if "[ANALYSIS]:" in response:
+            analysis = response.split("[ANALYSIS]:", 1)[1].split("[CONFIDENCE]", 1)[0].strip()
+    except Exception:
+        pass
+
+    return {"signal": signal, "confidence": confidence, "analysis": analysis}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # DATA FETCHING
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fetch_stock_data(symbol: str, period: str = "6mo") -> pd.DataFrame:
-    """Fetch historical stock data from Yahoo Finance"""
     try:
         session = requests.Session()
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        })
-        
+        session.headers.update(
+            {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        )
         ticker = yf.Ticker(symbol, session=session)
         df = ticker.history(period=period, interval="1d", auto_adjust=False)
-        
+
         if df is None or df.empty:
-            raise HTTPException(status_code=404, detail=f"No data for {symbol}")
-        
-        df = df.reset_index()
-        return df
+            raise HTTPException(status_code=404, detail=f"Ticker symbol '{symbol}' was not found on Yahoo Finance.")
+
+        return df.reset_index()
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Yahoo Finance error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Yahoo Finance engine failed: {str(e)}")
 
 def get_fundamentals(symbol: str) -> dict:
-    """Fetch fundamental data"""
     try:
         session = requests.Session()
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        })
-        
+        session.headers.update(
+            {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        )
         ticker = yf.Ticker(symbol, session=session)
         info = ticker.info or {}
-        
+
         return {
             "name": info.get("longName") or symbol,
             "pe_ratio": info.get("trailingPE"),
@@ -169,16 +186,15 @@ def get_fundamentals(symbol: str) -> dict:
         return {"name": symbol}
 
 def build_technical_signal(df: pd.DataFrame) -> dict:
-    """Build technical analysis signal"""
     try:
         close = pd.to_numeric(df["Close"], errors="coerce").dropna()
         if len(close) < 50:
             return {"signal": "HOLD", "rsi": 50, "sma20": 0, "sma50": 0, "confidence": 50}
-        
+
         sma20 = float(scalar(close.rolling(20).mean().iloc[-1]))
         sma50 = float(scalar(close.rolling(50).mean().iloc[-1]))
         rsi14 = float(scalar(compute_rsi(close).iloc[-1]))
-        
+
         confidence = 50
         if sma20 > sma50 and rsi14 >= 55:
             signal = "BUY"
@@ -188,37 +204,80 @@ def build_technical_signal(df: pd.DataFrame) -> dict:
             confidence = max(int(50 - (50 - rsi14) / 5), 0)
         else:
             signal = "HOLD"
-            confidence = 50
-        
+
         return {
             "signal": signal,
             "rsi": round(rsi14, 2),
             "sma20": round(sma20, 2),
             "sma50": round(sma50, 2),
-            "confidence": confidence
+            "confidence": confidence,
         }
     except Exception:
         return {"signal": "HOLD", "rsi": 50, "sma20": 0, "sma50": 0, "confidence": 50}
 
+def get_live_quote(symbol: str) -> dict:
+    symbol = normalize_symbol(symbol)
+    try:
+        session = requests.Session()
+        session.headers.update({"User-Agent": "Mozilla/5.0"})
+
+        ticker = yf.Ticker(symbol, session=session)
+        fast = getattr(ticker, "fast_info", {}) or {}
+
+        info = {}
+        try:
+            info = ticker.info or {}
+        except Exception:
+            pass
+
+        hist = None
+        try:
+            hist = ticker.history(period="1d", interval="1m", auto_adjust=False)
+        except Exception:
+            hist = None
+
+        cmp = (
+            fast.get("lastPrice")
+            or info.get("currentPrice")
+            or (
+                float(hist["Close"].dropna().iloc[-1])
+                if hist is not None and not hist.empty and "Close" in hist.columns
+                else None
+            )
+        )
+
+        prev_close = fast.get("previousClose") or info.get("previousClose") or cmp
+
+        day_change_pct = None
+        if cmp is not None and prev_close not in (None, 0):
+            day_change_pct = round(((float(cmp) - float(prev_close)) / float(prev_close)) * 100, 2)
+
+        return {
+            "symbol": symbol,
+            "cmp": round(float(cmp), 2) if cmp is not None else None,
+            "prev_close": round(float(prev_close), 2) if prev_close is not None else None,
+            "day_change_pct": day_change_pct,
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Live quote error: {str(e)}")
+
 # ─────────────────────────────────────────────────────────────────────────────
-# NVIDIA NIM AI - Dual Implementation
+# NVIDIA NIM
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Option 1: OpenAI Python Client (Simpler, Official)
 try:
     from openai import OpenAI
+
     NVIDIA_CLIENT = OpenAI(
-        base_url="https://integrate.api.nvidia.com/v1",
-        api_key=NVIDIA_API_KEY
+        base_url=NVIDIA_BASE,
+        api_key=NVIDIA_API_KEY,
     )
     USE_OPENAI_CLIENT = True
-except ImportError:
+except Exception:
     USE_OPENAI_CLIENT = False
 
 async def call_nvidia_ai(messages: list, temperature: float = 0.7) -> str:
-    """Call NVIDIA NIM API - supports both OpenAI client and httpx"""
-    
-    # Method 1: Use OpenAI Client (if available)
     if USE_OPENAI_CLIENT:
         try:
             completion = NVIDIA_CLIENT.chat.completions.create(
@@ -227,20 +286,19 @@ async def call_nvidia_ai(messages: list, temperature: float = 0.7) -> str:
                 temperature=temperature,
                 top_p=1,
                 max_tokens=1024,
-                stream=False
+                stream=False,
             )
             return completion.choices[0].message.content
-        except Exception as e:
-            print(f"OpenAI client error: {e}, falling back to httpx")
-    
-    # Method 2: Fallback to async httpx (always available)
+        except Exception:
+            pass
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 f"{NVIDIA_BASE}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {NVIDIA_API_KEY}",
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
                 },
                 json={
                     "model": "meta/llama-3.1-405b-instruct",
@@ -248,40 +306,16 @@ async def call_nvidia_ai(messages: list, temperature: float = 0.7) -> str:
                     "temperature": temperature,
                     "top_p": 1,
                     "max_tokens": 1024,
-                    "stream": False
-                }
+                    "stream": False,
+                },
             )
-            
             if response.status_code == 200:
                 data = response.json()
                 return data["choices"][0]["message"]["content"]
-            else:
-                return "HOLD"
-    except Exception as e:
-        print(f"NVIDIA API error: {e}")
-        return "HOLD"
-
-def parse_agent_response(response: str) -> dict:
-    """Parse agent response"""
-    signal = "HOLD"
-    confidence = 50
-    analysis = response
-    
-    try:
-        if "[SIGNAL]:" in response:
-            signal_line = response.split("[SIGNAL]:")[1].split("\n")[0].strip()
-            signal = signal_line.split("|")[0].strip()
-        
-        if "[CONFIDENCE]:" in response:
-            conf_line = response.split("[CONFIDENCE]:")[1].split("\n")[0].strip()
-            confidence = int(conf_line)
-        
-        if "[ANALYSIS]:" in response:
-            analysis = response.split("[ANALYSIS]:")[1].split("[CONFIDENCE]")[0].strip()
-    except:
+    except Exception:
         pass
-    
-    return {"signal": signal, "confidence": confidence, "analysis": analysis}
+
+    return "HOLD"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ENDPOINTS
@@ -290,14 +324,15 @@ def parse_agent_response(response: str) -> dict:
 @app.get("/")
 def root():
     return {
-        "name": "⚡ Bharat Terminal API",
-        "version": "2.0.0",
+        "name": "Bharat Terminal API",
+        "version": "2.1.0",
         "endpoints": {
             "search": "/search?q=RELIANCE",
             "analyze": "/analyze/RELIANCE",
+            "quote": "/quote/RELIANCE",
             "nifty50": "/nifty50",
             "news": "/news",
-        }
+        },
     }
 
 @app.get("/health")
@@ -306,64 +341,32 @@ def health():
 
 @app.get("/search")
 async def search_stock(q: str = Query(..., min_length=1)):
-    """Search for any Indian stock - NIFTY50 first, then try Yahoo Finance"""
+    """Search for stocks in NIFTY50"""
     q = q.strip().upper()
-    
-    # First check NIFTY50 stocks
-    nifty_results = [s for s in NIFTY50 if q in s]
-    
-    # If limited results, try to fetch from Yahoo Finance
-    results = []
-    seen = set()
-    
-    # Add NIFTY50 matches
-    for symbol in nifty_results[:5]:
-        results.append(symbol)
-        seen.add(symbol)
-    
-    # Try direct lookup if single result
-    try:
-        if len(nifty_results) == 0:
-            # Try exact symbol lookup with .NS extension
-            test_symbols = [f"{q}.NS", f"{q}.BO", q]
-            for test_symbol in test_symbols:
-                if test_symbol not in seen:
-                    ticker = yf.Ticker(test_symbol)
-                    info = ticker.info or {}
-                    if info.get("regularMarketPrice"):  # Valid stock
-                        results.append(test_symbol)
-                        seen.add(test_symbol)
-                        break
-    except:
-        pass
-    
-    return {
-        "query": q,
-        "results": results[:10],
-        "count": len(results),
-        "message": "Stock found" if results else "Stock not found. Try searching with NSE symbol (e.g., RELIANCE, TCS, INFY)"
-    }
+    results = [s for s in NIFTY50 if q in s]
+    return {"query": q, "results": results[:10], "count": len(results)}
 
 @app.get("/analyze/{symbol}")
 async def analyze_stock(symbol: str, period: str = "6mo"):
-    """Comprehensive stock analysis with multi-agent debate"""
+    # Apply normalization first
     symbol = normalize_symbol(symbol)
-    
+
     try:
-        # Fetch data
         df = fetch_stock_data(symbol, period)
         fund = get_fundamentals(symbol)
         tech = build_technical_signal(df)
-        
-        # Extract metrics
+
         close = pd.to_numeric(df["Close"], errors="coerce").dropna()
+        if close.empty:
+            raise HTTPException(status_code=404, detail=f"No trade data available for {symbol}")
+
         cmp = float(scalar(close.iloc[-1]))
         prev_close = float(scalar(close.iloc[-2])) if len(close) > 1 else cmp
         day_change_pct = ((cmp - prev_close) / prev_close * 100) if prev_close != 0 else 0
-        
+
         week52_high = float(close.tail(252).max())
         week52_low = float(close.tail(252).min())
-        
+
         metrics = {
             "cmp": round(cmp, 2),
             "pe_ratio": fund.get("pe_ratio"),
@@ -374,16 +377,15 @@ async def analyze_stock(symbol: str, period: str = "6mo"):
             "week52_high": round(week52_high, 2),
             "week52_low": round(week52_low, 2),
         }
-        
+
         technical = {
             "signal": tech["signal"],
             "rsi": tech["rsi"],
             "sma20": tech["sma20"],
             "sma50": tech["sma50"],
-            "confidence": tech["confidence"]
+            "confidence": tech["confidence"],
         }
-        
-        # Multi-agent AI analysis
+
         data_context = f"""
 Stock: {symbol}
 CMP: ₹{cmp}
@@ -392,33 +394,46 @@ Market Cap: {metrics['market_cap']}
 52W High/Low: ₹{week52_high} / ₹{week52_low}
 RSI: {tech['rsi']} | SMA20: {tech['sma20']} | SMA50: {tech['sma50']}
 """
-        
+
         agents = []
         for agent_name, prompt in AGENT_PROMPTS.items():
             try:
-                ai_response = await call_nvidia_ai([
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": data_context}
-                ])
+                ai_response = await call_nvidia_ai(
+                    [
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": data_context},
+                    ]
+                )
                 parsed = parse_agent_response(ai_response)
-                agents.append({
-                    "agent": agent_name,
-                    "signal": parsed["signal"],
-                    "analysis": parsed["analysis"],
-                    "confidence": parsed["confidence"]
-                })
-            except Exception as e:
-                print(f"Agent {agent_name} error: {e}")
-        
+                agents.append(
+                    {
+                        "agent": agent_name,
+                        "signal": parsed["signal"],
+                        "analysis": parsed["analysis"],
+                        "confidence": parsed["confidence"],
+                    }
+                )
+            except Exception:
+                agents.append(
+                    {
+                        "agent": agent_name,
+                        "signal": "HOLD",
+                        "analysis": "AI call failed",
+                        "confidence": 50,
+                    }
+                )
+
         return {
             "ticker": symbol,
             "name": fund.get("name", symbol),
             "metrics": metrics,
             "technical": technical,
             "agents": agents,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
-    
+
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error analyzing {symbol}: {e}")
         # Return demo data instead of failing
@@ -463,42 +478,43 @@ RSI: {tech['rsi']} | SMA20: {tech['sma20']} | SMA50: {tech['sma50']}
 
 @app.get("/nifty50")
 async def nifty50_analysis():
-    """Quick analysis of NIFTY50 stocks"""
     results = []
-    for symbol in NIFTY50[:10]:  # Top 10
+    for symbol in NIFTY50[:10]:
         try:
             df = fetch_stock_data(symbol, "1mo")
             close = pd.to_numeric(df["Close"], errors="coerce").dropna()
+            if close.empty:
+                continue
+
             cmp = float(close.iloc[-1])
             prev_close = float(close.iloc[-2]) if len(close) > 1 else cmp
             change_pct = ((cmp - prev_close) / prev_close * 100) if prev_close != 0 else 0
-            
-            results.append({
-                "ticker": symbol,
-                "cmp": round(cmp, 2),
-                "change": f"{round(change_pct, 2)}%",
-                "rsi": round(float(scalar(compute_rsi(close).iloc[-1])), 2)
-            })
-        except:
+
+            results.append(
+                {
+                    "ticker": symbol,
+                    "cmp": round(cmp, 2),
+                    "change": f"{round(change_pct, 2)}%",
+                    "rsi": round(float(scalar(compute_rsi(close).iloc[-1])), 2),
+                }
+            )
+        except Exception:
             pass
-    
+
     return {"nifty50_snapshot": results, "timestamp": datetime.now().isoformat()}
 
 @app.get("/watchlist")
 async def watchlist(symbols: str = "RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS"):
-    """Get watchlist analysis"""
     items = []
     for symbol in symbols.split(","):
         try:
-            result = await analyze_stock(normalize_symbol(symbol.strip()))
-            items.append(result)
-        except:
+            items.append(await analyze_stock(symbol.strip()))
+        except Exception:
             pass
     return {"watchlist": items}
 
 @app.get("/news")
 async def get_market_news():
-    """Get market news"""
     return {
         "news": [
             {"title": "Markets reach all-time high", "source": "Economic Times", "timestamp": datetime.now().isoformat()},
@@ -506,10 +522,6 @@ async def get_market_news():
             {"title": "FII inflows surge", "source": "Hindustan Times", "timestamp": datetime.now().isoformat()},
         ]
     }
-
-# ─────────────────────────────────────────────────────────────────────────────
-# RUN
-# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import uvicorn
