@@ -50,6 +50,14 @@ NIFTY50 = [
     "ADANIPORTS.NS", "TATACONSUM.NS", "SBILIFE.NS", "HDFC.NS", "APOLLOHOSP.NS",
 ]
 
+# Common variations mapped to valid Yahoo Finance National Stock Exchange codes
+TICKER_CORRECTIONS = {
+    "BANKOFBARODA": "BANKBARODA",
+    "BOB": "BANKBARODA",
+    "M&M": "M&M",
+    "BAJAJ-AUTO": "BAJAJ-AUTO",
+}
+
 AGENT_PROMPTS = {
     "technical": """You are an elite technical analyst for Indian NSE/BSE markets.
 Analyze the stock data and respond ONLY with:
@@ -88,8 +96,14 @@ Respond ONLY with:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def normalize_symbol(symbol: str) -> str:
+    """Cleans up search input strings and converts them into valid Yahoo Finance NSE codes."""
     symbol = symbol.strip().upper()
-    symbol = symbol.replace(".NS", "").replace(".BO", "")
+    symbol = symbol.replace(".NS", "").replace(".BO", "").replace(" ", "")
+    
+    # Correct names like BANKOFBARODA into official ticker IDs like BANKBARODA
+    if symbol in TICKER_CORRECTIONS:
+        symbol = TICKER_CORRECTIONS[symbol]
+        
     return f"{symbol}.NS"
 
 def scalar(value: Any) -> Any:
@@ -143,13 +157,13 @@ def fetch_stock_data(symbol: str, period: str = "6mo") -> pd.DataFrame:
         df = ticker.history(period=period, interval="1d", auto_adjust=False)
 
         if df is None or df.empty:
-            raise HTTPException(status_code=404, detail=f"No data for {symbol}")
+            raise HTTPException(status_code=404, detail=f"Ticker symbol '{symbol}' was not found on Yahoo Finance.")
 
         return df.reset_index()
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Yahoo Finance error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Yahoo Finance engine failed: {str(e)}")
 
 def get_fundamentals(symbol: str) -> dict:
     try:
@@ -329,6 +343,10 @@ def health():
 async def search_stock(q: str = Query(..., min_length=1)):
     q = q.strip().upper()
     cleaned_query = q.replace(".NS", "").replace(".BO", "").replace(" ", "")
+    
+    # Handle search matching for standard bank names like 'BANKOFBARODA'
+    if cleaned_query in TICKER_CORRECTIONS:
+        cleaned_query = TICKER_CORRECTIONS[cleaned_query]
 
     results = []
     for stock in NIFTY50:
@@ -347,6 +365,7 @@ async def quote(symbol: str):
 
 @app.get("/analyze/{symbol}")
 async def analyze_stock(symbol: str, period: str = "6mo"):
+    # Apply normalization first
     symbol = normalize_symbol(symbol)
 
     try:
@@ -356,7 +375,7 @@ async def analyze_stock(symbol: str, period: str = "6mo"):
 
         close = pd.to_numeric(df["Close"], errors="coerce").dropna()
         if close.empty:
-            raise HTTPException(status_code=404, detail=f"No close data for {symbol}")
+            raise HTTPException(status_code=404, detail=f"No trade data available for {symbol}")
 
         cmp = float(scalar(close.iloc[-1]))
         prev_close = float(scalar(close.iloc[-2])) if len(close) > 1 else cmp
