@@ -1,77 +1,58 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import "./App.css";
 import api from "./api";
 
-export default function App() {
-  const [timeframe, setTimeframe] = useState("1M");
+// Global API configuration fallback
+const API_BASE = "https://your-render-backend-url.onrender.com"; // Replace with your actual Render URL
 
-  // Dummy data for sections
-  const selectedStock = {
-    ticker: "GRASIM",
-    name: "Grasim Industries Ltd",
-    cmp: 3154.50,
-    change: "+48.75 (1.57%)",
-    high: 3180.00,
-    low: 3021.00,
-    open: 3105.75,
-    volume: "1.24 Cr",
-    marketCap: "₹2,13,954 Cr",
-    pe: 24.04,
-    rsi: 68,
-    signal: "BUY",
-    confidence: 86
+// Simple helper function for formatting numbers safely
+const fmt = (val) => (val != null && !isNaN(val) ? Number(val).toFixed(2) : "—");
+
+// Missing Sub-Components needed by your code
+function SignalBadge({ signal, confidence }) {
+  const isUp = signal?.toUpperCase() === "BUY" || signal?.toUpperCase() === "BULLISH";
+  return (
+    <span className={`signal-badge ${isUp ? "up" : "down"}`}>
+      {signal} ({confidence}%)
+    </span>
+  );
+}
+
+function MetricsCard({ metrics = {} }) {
+  return (
+    <div className="metrics-card">
+      <h4>Key Metrics</h4>
+      {Object.entries(metrics).map(([key, val]) => (
+        <div className="metric-row" key={key}>
+          <span className="metric-label">{key}</span>
+          <span className="metric-value">{val}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TechnicalSection({ technical = {} }) {
+  return (
+    <div className="technical-section">
+      <h4>Technical Indicators</h4>
+      <div className="metric-row">
+        <span className="metric-label">RSI</span>
+        <span className="metric-value">{technical.rsi || "N/A"}</span>
+      </div>
+    </div>
+  );
+}
+
+// Separate search bar component extracted cleanly from your template
+function SearchBar({ onSearch, loading }) {
+  const [input, setInput] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+
+  const handleChange = (e) => {
+    setInput(e.target.value);
+    // Add suggestion logic here if needed
   };
-
-  const marketDepth = [
-    { bid: "₹3,154.20", bidQty: 12, askQty: 14, ask: "₹3,154.65" },
-    { bid: "₹3,154.15", bidQty: 8, askQty: 9, ask: "₹3,154.70" },
-    { bid: "₹3,154.10", bidQty: 10, askQty: 11, ask: "₹3,154.75" },
-    { bid: "₹3,154.05", bidQty: 20, askQty: 7, ask: "₹3,154.80" },
-    { bid: "₹3,154.00", bidQty: 7, askQty: 6, ask: "₹3,154.85" }
-  ];
-
-  const keyInfo = {
-    "52 Week High": "₹3,511.96",
-    "52 Week Low": "₹2,076.15",
-    "P/E Ratio (TTM)": 43.09,
-    "EPS Ratio": "N/A",
-    "Dividend Yield": "0.32%",
-    "Market Cap": "₹2,13,954 Cr",
-    "Book Value": "₹2,218.45",
-    "Face Value": "₹2.00"
-  };
-
-  const performanceData = [
-    { label: "GRASIM", value: 3154.50, change: "+13.5%" },
-    { label: "NIFTY 50", value: 25100, change: "+4.2%" },
-    { label: "NIFTY 500", value: 19850, change: "+3.8%" }
-  ];
-
-  const analystRatings = {
-    buyPercentage: 100,
-    buyCount: 11,
-    holdCount: 0,
-    sellCount: 0
-  };
-
-  const upcomingEvents = [
-    { date: "20", month: "MAY", title: "Board Meeting", description: "Q1 Results Discussion" },
-    { date: "15", month: "JUN", title: "AGM 2026", description: "Annual General Meeting" },
-    { date: "12", month: "AUG", title: "Dividend Payment", description: "Final Dividend" }
-  ];
-
-  const latestNews = [
-    { title: "Grasim Industries Q4 PAT rises 31% YoY to ₹1,856 Cr", category: "Earnings", time: "1 hour ago" },
-    { title: "Board recommends final dividend of ₹50 per share", category: "Corporate", time: "3 days ago" },
-    { title: "Birla Opus pushes 70% YoY growth in sales", category: "Business", time: "1 day ago" },
-    { title: "Cement sector outlook remains positive: Report", category: "Industry", time: "2 days ago" }
-  ];
-
-  const expertCalls = [
-    { price: "₹3,450", target: "12.7%", upside: "Motilal Oswal", confidence: "86%" },
-    { price: "₹11,234.80", target: "82%", upside: "ULTRATECH", confidence: "82%" },
-    { price: "₹567.45", target: "78%", upside: "AMBUJA", confidence: "75%" }
-  ];
 
   const handleSubmit = (e, symbol = input) => {
     e?.preventDefault?.();
@@ -112,27 +93,52 @@ export default function App() {
             </div>
           ))}
         </div>
-        <div className="navbar-right">
-          <div className="search-header">
-            <input type="text" placeholder="Search stocks, indices, ETFs..." className="search-input-header" />
-            <span className="search-icon">🔍</span>
-          </div>
-          <button className="user-btn">SK</button>
+      )}
+    </div>
+  );
+}
+
+// Renamed your duplicate component from App to DashboardLayout
+function DashboardLayout({ selectedStock }) {
+  // Dummy data fallback if props are empty
+  const stock = selectedStock || {
+    ticker: "GRASIM",
+    name: "Grasim Industries Ltd",
+    cmp: 3154.5,
+    change: "+48.75 (1.57%)",
+    high: 3180.0,
+    low: 3021.0,
+    open: 3105.75,
+    volume: "1.24 Cr",
+    marketCap: "₹2,13,954 Cr",
+    pe: 24.04,
+    rsi: 68,
+    signal: "BUY",
+    confidence: 86,
+  };
+
+  return (
+    <div className="dashboard-layout">
+      <div className="navbar-right">
+        <div className="search-header">
+          <input type="text" placeholder="Search stocks, indices, ETFs..." className="search-input-header" />
+          <span className="search-icon">🔍</span>
         </div>
-      </nav>
+        <button className="user-btn">SK</button>
+      </div>
 
       {/* Stock Header Info */}
       <div className="stock-header-info">
         <div className="stock-info-left">
           <div className="stock-name">
-            <h2>{selectedStock.name}</h2>
-            <span className="stock-ticker">{selectedStock.ticker}</span>
+            <h2>{stock.name}</h2>
+            <span className="stock-ticker">{stock.ticker}</span>
             <span className="stock-exchange">NSE</span>
           </div>
         </div>
         <div className="stock-price-section">
-          <div className="current-price">₹{selectedStock.cmp.toFixed(2)}</div>
-          <div className="price-change up">{selectedStock.change}</div>
+          <div className="current-price">₹{stock.cmp?.toFixed(2)}</div>
+          <div className="price-change up">{stock.change}</div>
           <div className="action-buttons">
             <button className="btn-buy">Buy for the Day</button>
             <button className="btn-hold">Hold</button>
@@ -154,27 +160,27 @@ export default function App() {
             <h4>Key Metrics</h4>
             <div className="metric-row">
               <span className="metric-label">High</span>
-              <span className="metric-value">₹{selectedStock.high}</span>
+              <span className="metric-value">₹{stock.high}</span>
             </div>
             <div className="metric-row">
               <span className="metric-label">Low</span>
-              <span className="metric-value">₹{selectedStock.low}</span>
+              <span className="metric-value">₹{stock.low}</span>
             </div>
             <div className="metric-row">
               <span className="metric-label">Open</span>
-              <span className="metric-value">₹{selectedStock.open}</span>
+              <span className="metric-value">₹{stock.open}</span>
             </div>
             <div className="metric-row">
               <span className="metric-label">Volume</span>
-              <span className="metric-value">{selectedStock.volume}</span>
+              <span className="metric-value">{stock.volume}</span>
             </div>
             <div className="metric-row">
               <span className="metric-label">Market Cap</span>
-              <span className="metric-value">{selectedStock.marketCap}</span>
+              <span className="metric-value">{stock.marketCap}</span>
             </div>
             <div className="metric-row">
               <span className="metric-label">P/E</span>
-              <span className="metric-value">{selectedStock.pe}</span>
+              <span className="metric-value">{stock.pe}</span>
             </div>
           </div>
 
@@ -182,7 +188,7 @@ export default function App() {
           <div className="sentiment-card">
             <h4>AI Sentiment Analysis</h4>
             <div className="sentiment-score">
-              <div className="score-number">68</div>
+              <div className="score-number">{stock.rsi}</div>
               <div className="score-label">Bullish</div>
             </div>
             <div className="sentiment-items">
@@ -250,7 +256,7 @@ function Nifty50Snapshot() {
     } catch (err) {
       console.error(err);
       setSnapshot(null);
-    } finally {
+    } finaly {
       setLoading(false);
     }
   };
@@ -357,6 +363,7 @@ function StockDetail({ stock, onClose }) {
   );
 }
 
+// Single Main App Export Router at the bottom
 export default function App() {
   const [selectedStock, setSelectedStock] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -382,8 +389,7 @@ export default function App() {
           metrics: {
             ...prev.metrics,
             cmp: q.cmp ?? prev.metrics?.cmp,
-            day_change:
-              q.day_change_pct != null ? `${q.day_change_pct}%` : prev.metrics?.day_change,
+            day_change: q.day_change_pct != null ? `${q.day_change_pct}%` : prev.metrics?.day_change,
           },
         };
       });
@@ -415,7 +421,7 @@ export default function App() {
     } catch (err) {
       console.error("Error:", err);
       setError(err.message || "Failed to fetch stock data");
-    } finally {
+    } finaly {
       setLoading(false);
     }
   };
@@ -449,6 +455,7 @@ export default function App() {
           <StockDetail stock={selectedStock} onClose={() => setSelectedStock(null)} />
         ) : (
           <>
+            <DashboardLayout selectedStock={selectedStock} />
             <Nifty50Snapshot />
             <NewsSection />
           </>
@@ -456,7 +463,7 @@ export default function App() {
       </main>
 
       <footer className="app-footer">
-        <p>© 2024 Bharat Terminal | Live NSE/BSE Data | NVIDIA NIM AI</p>
+        <p>© 2026 Bharat Terminal | Live NSE/BSE Data | NVIDIA NIM AI</p>
       </footer>
     </div>
   );
